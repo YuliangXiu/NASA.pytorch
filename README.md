@@ -8,7 +8,7 @@ A tiny but handy training code base for general tasks, written in pytorch. Featu
 - support checkpoint resuming (including optimizer, options etc) by default.
 - support config file *.yaml and command line config at the same time. (see train_net.sh for example)
 
-The purpose of this code base is you don't need to write those same things again and again for different projects. So I make this code base as general as possible. All you need to change is the network defination and dataset defination in `train.py`.
+The purpose of this code base is you don't need to write those same things again and again for different projects. So I make this code base as general as possible. All you need to change is the network defination and dataset defination in `train.py`. (Search for `TODO` in `train.py` to see where you need to change for your task.)
 
 You can also add your task-specific default configs to `lib/common/configs.py`, and use either *.yaml or command lines to overwrite those configs. (see train_net.sh for example)
 
