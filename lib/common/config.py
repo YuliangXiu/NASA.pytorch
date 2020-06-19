@@ -29,6 +29,8 @@ _C.net.backbone = ''
 
 _C.dataset = CN()
 _C.dataset.root = ''
+_C.dataset.num_sample_geo = 5000
+_C.dataset.sigma_geo = 0.05
 
 
 def get_cfg_defaults():

@@ -1,1 +1,20 @@
-name: 'example'
+name: first-try
+# ckpt_path: ../data/checkpoints/first-try/ckpt_0.pth
+dataset:
+  root: ../data
+  num_sample_geo: 2048
+  sigma_geo: 0.05
+
+learning_rate: 0.001 
+batch_size: 24
+num_threads: 24
+resume: True
+
+momentum: 0.5 
+optim: Adam
+
+num_epoch: 15
+freq_eval: 1000
+freq_plot: 10
+freq_save: 500
+schedule: [5, 10]

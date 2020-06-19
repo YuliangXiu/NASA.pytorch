@@ -5,6 +5,7 @@ import sys
 import os
 import argparse
 import time
+from tqdm import tqdm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -13,6 +14,8 @@ import torchvision
 sys.path.insert(0, '../')
 from lib.common.trainer import Trainer
 from lib.common.config import get_cfg_defaults
+from lib.dataset.AMASSdataset import AMASSdataset
+from lib.net.DeepSDF import Net
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -20,72 +23,53 @@ parser.add_argument(
 argv = sys.argv[1:sys.argv.index('--')]
 args = parser.parse_args(argv)
 
-opts = sys.argv[sys.argv.index('--') + 1:]
+# opts = sys.argv[sys.argv.index('--') + 1:]
 
 # default cfg: defined in 'lib.common.config.py'
 cfg = get_cfg_defaults()
 cfg.merge_from_file(args.config_file)
 # Now override from a list (opts could come from the command line)
 # opts = ['dataset.root', '../data/XXXX', 'learning_rate', '1e-2']
-cfg.merge_from_list(opts)
+# cfg.merge_from_list(opts)
 cfg.freeze()
 
-
-class Net(nn.Module):
-    def __init__(self):
-        super(Net, self).__init__()
-        self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
-        self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
-        self.conv2_drop = nn.Dropout2d()
-        self.fc1 = nn.Linear(320, 50)
-        self.fc2 = nn.Linear(50, 10)
-
-    def forward(self, x):
-        x = F.relu(F.max_pool2d(self.conv1(x), 2))
-        x = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(x)), 2))
-        x = x.view(-1, 320)
-        x = F.relu(self.fc1(x))
-        x = F.dropout(x, training=self.training)
-        x = self.fc2(x)
-        return F.log_softmax(x)
 
 
 def test(net):
     net.eval()
     # set dataset
-    test_dataset = torchvision.datasets.MNIST(
-        '../data/', train=False, download=True,
-        transform=torchvision.transforms.Compose([
-            torchvision.transforms.ToTensor(),
-            torchvision.transforms.Normalize(
-                (0.1307,), (0.3081,))
-        ]))
+    test_dataset = AMASSdataset(cfg.dataset, split="test")
     test_loader = torch.utils.data.DataLoader(
         test_dataset,
-        batch_size=1, shuffle=False,
-        num_workers=1, pin_memory=True)
+        batch_size=cfg.batch_size, shuffle=False,
+        num_workers=12, pin_memory=True)
 
     test_loss = 0
     correct = 0
+
     with torch.no_grad():
-        for data, target in test_loader:
-            data = data.cuda()
+        pbar = tqdm(test_loader)
+        for data_BX, data_BT, target in pbar:
+            data_BX = data_BX.cuda()
+            data_BT = data_BT.cuda()
             target = target.cuda()
-            output = net(data)
-            test_loss += F.nll_loss(output, target, size_average=False).item()
-            pred = output.data.max(1, keepdim=True)[1]
-            correct += pred.eq(target.data.view_as(pred)).sum()
+            output = net(data_BX, data_BT)
+            test_loss += F.mse_loss(output, target).item()
+
+            pred = output.data
+            pred = pred.masked_fill(pred<0.5, 0.)
+            pred = pred.masked_fill(pred>=0.5, 1.)
+
+            correct += pred.eq(target.data.view_as(pred)).float().mean()
+
     test_loss /= len(test_loader.dataset)
-    print('\nTest set: Avg. loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
-        test_loss, correct, len(test_loader.dataset),
-        100. * correct / len(test_loader.dataset)))
+    print('\nTest set: Avg. loss: {:.4f}, Accuracy: {:.2f}%\n'.format(
+        test_loss, 100. * correct / len(test_loader.dataset)))
 
 
 def train(device='cuda'):
-    # -- TODO: change this line below --
     # setup net 
-    net = Net().to(device)
-    # ----
+    net = Net(21, 4, 40, 4).to(device)
 
     # setup trainer
     trainer = Trainer(net, cfg, use_tb=True)
@@ -95,16 +79,8 @@ def train(device='cuda'):
     else:
         trainer.logger.info(f'ckpt {cfg.ckpt_path} not found.')
 
-    # -- TODO: change this line below --
     # set dataset
-    train_dataset = torchvision.datasets.MNIST(
-        '../data/', train=True, download=True,
-        transform=torchvision.transforms.Compose([
-            torchvision.transforms.ToTensor(),
-            torchvision.transforms.Normalize(
-                (0.1307,), (0.3081,))
-        ]))
-    # ----
+    train_dataset = AMASSdataset(cfg.dataset, split="train")
 
     train_data_loader = torch.utils.data.DataLoader(
         train_dataset,
@@ -125,23 +101,25 @@ def train(device='cuda'):
             batch_size=cfg.batch_size, shuffle=True,
             num_workers=cfg.num_threads, pin_memory=True, drop_last=True)
         loader = iter(train_data_loader)
-        niter = len(train_data_loader)        
+        niter = len(train_data_loader)      
         
         epoch_start_time = iter_start_time = time.time()
         for iteration in range(start_iter, niter):
-            # -- TODO: change this line below --
-            data, target = next(loader)         
-            # ----
+
+            # data_BX [B, N, 21, 3]
+            # data_BT [B, N, 21, 3]
+            # theta_out [B, N, 21]
+
+            data_BX, data_BT, target = next(loader)  
                
             iter_data_time = time.time() - iter_start_time
             global_step = epoch * niter + iteration
             
-            # -- TODO: change this line below --
-            data = data.to(device)
+            data_BX = data_BX.to(device)
+            data_BT = data_BT.to(device)
             target = target.to(device)
-            output = trainer.net(data)
-            loss = F.nll_loss(output, target)
-            # ----
+            output = trainer.net(data_BX, data_BT)
+            loss = F.mse_loss(output, target)
 
             trainer.optimizer.zero_grad()
             loss.backward()
@@ -169,9 +147,7 @@ def train(device='cuda'):
             # evaluation
             if iteration % cfg.freq_eval == 0 and iteration > 0:
                 trainer.net.eval()
-                # -- TODO: change this line below --
                 test(trainer.net.module)
-                # ----
                 trainer.net.train()
 
             # end
