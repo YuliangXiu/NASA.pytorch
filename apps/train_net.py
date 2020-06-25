@@ -58,11 +58,19 @@ def test(net, logger):
             data_BT = data_BT.cuda()
             target = target.cuda()
             output = net(data_BX, data_BT)
-            test_loss += F.mse_loss(output, target).item()
+            output_max = torch.max(output, dim=2)[0]
+            test_loss_sample = F.mse_loss(output_max, target).item()
 
-            pred = output.data
+            output_verts = output[:, -(cfg.dataset.num_verts):, :]
+            weights = data_dict['weights'].to(device)
+            
+            test_loss_skw = F.mse_loss(output_vertse, weights).item()
+
+            test_loss += loss_sample + cfg.dataset.sk_ratio * loss_skw
+
+            pred = output_max.data
             pred = pred.masked_fill(pred<0.5, 0.)
-            pred = pred.masked_fill(pred>=0.5, 1.)
+            pred = pred.masked_fill(pred>0.5, 1.)
 
             correct += pred.eq(target.data.view_as(pred)).float().mean()
 
@@ -131,12 +139,23 @@ def train(device='cuda'):
             data_BT = data_BT.to(device)
             target = target.to(device)
             output = trainer.net(data_BX, data_BT)
-            loss = F.mse_loss(output, target)
+            output_max = torch.max(output, dim=2)[0]
 
-            output = output.masked_fill(output<0.5, 0.)
-            output = output.masked_fill(output>=0.5, 1.)
+            loss_sample = F.mse_loss(output_max, target)
 
-            correct = output.eq(target).float().mean()
+            # weights [B, 6890, 21]
+            # output_verts [B, 6890, 21]
+            output_verts = output[:, -(cfg.dataset.num_verts):, :]
+            weights = data_dict['weights'].to(device)
+            
+            loss_skw = F.mse_loss(output_verts, weights)
+
+            loss = loss_sample + cfg.dataset.sk_ratio * loss_skw
+
+            output_max = output_max.masked_fill(output_max<0.5, 0.)
+            output_max = output_max.masked_fill(output_max>0.5, 1.)
+
+            correct = output_max.eq(target).float().mean()
 
             trainer.optimizer.zero_grad()
             loss.backward()
@@ -152,10 +171,12 @@ def train(device='cuda'):
                     +f'dataT: {(iter_data_time):.3f}|' \
                     +f'totalT: {(iter_time):.3f}|'
                     +f'ETA: {int(eta // 60):02d}:{int(eta - 60 * (eta // 60)):02d}|' \
-                    +f'Err:{loss.item():.5f}|' \
+                    +f'Err:{loss.item():.4f}|' \
                     +f'Prop:{correct.item():.5f}|'
                 )
-                trainer.tb_writer.add_scalar('data/loss', loss.item(), global_step)
+                trainer.tb_writer.add_scalar('data/loss_total', loss.item(), global_step)
+                trainer.tb_writer.add_scalar('data/loss_sample', loss_sample.item(), global_step)
+                trainer.tb_writer.add_scalar('data/loss_weight', loss_skw.item(), global_step)
                 trainer.tb_writer.add_scalar('data/prop', correct.item(), global_step)
             
             # update image

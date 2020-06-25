@@ -45,7 +45,7 @@ class Net(nn.Module):
         self.n_elements = n_elements
         self.theta = nn.ModuleList()
         self.pi = nn.ModuleList()
-        self.softmax = nn.Softmax(dim=1)
+        self.softmax = nn.Softmax(dim=2)
         for i in range(self.n_elements):
             self.pi.append(ResidualBlock(n_elements, n_layers, 
                                         width, D_dim, False))
@@ -56,9 +56,7 @@ class Net(nn.Module):
 
         # data_BX [B, N, 21, 3]
         # data_BT [B, N, 21, 3]
-        # theta_out [B * N, 21]
-
-        # return [B, N]
+        # theta_out [B, N, 21]
 
         B, N = data_bt.shape[:2]
         theta_out = torch.randn(B*N, self.n_elements).cuda()
@@ -69,10 +67,9 @@ class Net(nn.Module):
 
             theta_out[:, [i]] = self.theta[i](
                 torch.cat((pi_out, data_bx[:,:,i,:].reshape(B*N,3)), dim=1))
+        theta_out = theta_out.reshape(B, N, self.n_elements)
         
-        theta_out = torch.max(self.softmax(theta_out), dim=1)[0].reshape(B, N)
-
-        return theta_out
+        return self.softmax(theta_out)
 
 
 if __name__ == "__main__":

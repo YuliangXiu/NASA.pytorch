@@ -159,7 +159,6 @@ class Seg3dLossless(nn.Module):
                 occupancys_split = torch.stack(occupancys_split) #[bz, C, N]
             occupancys.append(occupancys_split)
         occupancys = torch.cat(occupancys, dim=2)
-
         assert len(occupancys.size()) == 3, \
             "query_func should return a occupancy with shape of [bz, C, N]"
         return occupancys

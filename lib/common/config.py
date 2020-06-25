@@ -33,6 +33,8 @@ _C.dataset = CN()
 _C.dataset.root = ''
 _C.dataset.num_sample_geo = 5000
 _C.dataset.sigma_geo = 0.05
+_C.dataset.num_verts = 2048
+_C.dataset.sk_ratio = 1.0
 
 
 def get_cfg_defaults():

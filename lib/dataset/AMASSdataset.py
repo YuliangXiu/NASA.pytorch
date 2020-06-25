@@ -1,5 +1,7 @@
 import os, sys
 
+sys.path.insert(0, '../../')
+
 import numpy as np
 from PIL import Image
 import trimesh
@@ -22,13 +24,10 @@ import torchvision.transforms as transforms
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 
-from .hoppeMesh import HoppeMesh
-from .sample import sample_surface
-from .mesh_util import obj_loader
-
-# from hoppeMesh import HoppeMesh
-# from sample import sample_surface
-# from mesh_util import obj_loader
+from lib.dataset.hoppeMesh import HoppeMesh
+from lib.dataset.sample import sample_surface
+from lib.dataset.mesh_util import obj_loader
+from lib.common.config import get_cfg_defaults
 
 import matplotlib.pyplot as plt
 
@@ -78,7 +77,7 @@ class AMASSdataset(Dataset):
         T_0 = data_dict['A'][0,:,-1]
         # sample points [N, 1, 4, 1]
         X = torch.cat((data_dict['samples_geo'], 
-            torch.ones(self.opt.num_sample_geo, 1)),dim=1)[:, None, :, None] 
+            torch.ones(self.opt.num_sample_geo+self.opt.num_verts, 1)),dim=1)[:, None, :, None] 
 
         # [21, 4, 4] x [N, 1, 4, 1] - > [N, 21, 4, 1] -- > [N, 21, 3]
         data_BX = torch.matmul(B_inv, X)[:, :, :3, 0] 
@@ -86,13 +85,19 @@ class AMASSdataset(Dataset):
         # root location [1, 1, 4, 1] -- > [N, 1, 4, 1]
         # [21, 4, 4] x [N, 1, 4, 1] - > [N, 21, 4, 1] -- > [N, 21, 3]
         data_BT = torch.matmul(B_inv, T_0[None, None,:,None].repeat(
-            self.opt.num_sample_geo, 1, 1, 1))[:, :, :3, 0] 
+            self.opt.num_sample_geo+self.opt.num_verts, 1, 1, 1))[:, :, :3, 0] 
 
         # [N, ]
         targets = data_dict['labels_geo']
 
+        # [num_verts, 21]
+        vert_idx = data_dict['samples_verts_idx']
+        weights = torch.Tensor(data_dict['weights'][vert_idx,1:self.num_poses+1])
+        weights_one_hot = torch.nn.functional.one_hot(weights.max(dim=1)[1]) * 0.5
+
         return {'B_inv': B_inv,
                 'T_0': T_0,
+                'weights': weights_one_hot,
                 'data_BX':data_BX, 
                 'data_BT':data_BT, 
                 'targets':targets}
@@ -125,7 +130,9 @@ class AMASSdataset(Dataset):
             vert_normals=vert_normals, 
             face_normals=face_normals)
 
-        return {'mesh': mesh, 'A': body.A[0,:self.num_poses+1]}
+        return {'mesh': mesh, 
+                'A': body.A[0,:self.num_poses+1],
+                'weights': body.weights}
 
     def get_sampling_geo(self, data_dict):
         mesh = data_dict['mesh']
@@ -137,6 +144,10 @@ class AMASSdataset(Dataset):
         offset = np.random.normal(
             scale=self.opt.sigma_geo, size=(n_samples_surface, 1))
         samples_surface += mesh.face_normals[face_index] * offset
+
+        samples_verts_idx = np.random.choice(np.arange(mesh.verts.shape[0]),
+                            self.opt.num_verts, replace=False)
+        samples_verts = mesh.verts[samples_verts_idx,:]
         
         # Uniform samples in [-1, 1]
         b_min = np.array([-1.0, -1.0, -1.0])
@@ -166,8 +177,13 @@ class AMASSdataset(Dataset):
         labels = np.concatenate([
             np.ones(inside_samples.shape[0]), np.zeros(outside_samples.shape[0])])
 
+        # add original verts
+        samples = np.concatenate([samples, samples_verts], 0)
+        labels = np.concatenate([labels, 0.5 * np.ones(self.opt.num_verts)])
+
         return {
             'samples_geo': torch.Tensor(samples), 
+            'samples_verts_idx': samples_verts_idx,
             'labels_geo': torch.Tensor(labels),
         }
 
@@ -204,14 +220,22 @@ class AMASSdataset(Dataset):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--root', type=str, default='./data/')
-    parser.add_argument('--batch_size', type=int, default=10)
-    parser.add_argument('--workers', type=int, default=10)
-    parser.add_argument('--num_sample_geo', type=int, default=5000)
-    parser.add_argument('--sigma_geo', type=float, default=0.05)
-    args = parser.parse_args()
-        
-    dataset = AMASSdataset(args, split='vald')
+    parser.add_argument(
+        '-cfg', '--config_file', type=str, help='path of the yaml config file')
+    argv = sys.argv[1:sys.argv.index('--')]
+    args = parser.parse_args(argv)
+
+    # opts = sys.argv[sys.argv.index('--') + 1:]
+
+    # default cfg: defined in 'lib.common.config.py'
+    cfg = get_cfg_defaults()
+    cfg.merge_from_file(args.config_file)
+    # Now override from a list (opts could come from the command line)
+    # opts = ['dataset.root', '../data/XXXX', 'learning_rate', '1e-2']
+    # cfg.merge_from_list(opts)
+    cfg.freeze()
+
+    dataset = AMASSdataset(cfg, split='vald')
     # dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.workers)
     # bdata = next(iter(dataloader))
 
@@ -229,5 +253,5 @@ if __name__ == '__main__':
     # with tinyobj loader 5.27 iter/s
     import tqdm
     for data_dict in tqdm.tqdm(dataset):
-        print(data_dict)
+        print(data_dict['targets'])
         break

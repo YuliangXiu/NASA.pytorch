@@ -118,11 +118,12 @@ class Trainer():
         # data_BX [B, N, 21, 3]
         # data_BT [B, N, 21, 3]
 
-        pred = self.net(data_BX, data_BT)[:,None,:]
+        pred = self.net(data_BX, data_BT)
+        pred_max = torch.max(pred, dim=2)[0][:,None,:]
         # pred = self.test_recon(points)
 
         # return [B, 1, N]
-        return pred
+        return pred_max
 
     def test_recon(self, points):
 
