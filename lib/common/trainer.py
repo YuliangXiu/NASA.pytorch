@@ -93,11 +93,16 @@ class Trainer():
         # points [B, N, 3]
         # priors['B_inv'] [B, 21, 4, 4]
         # priors['T_0'] [B, 4]
-
+        
         B_inv = priors['B_inv'].cuda()
         T_0 = priors['T_0'].cuda()
 
         B, N, _ = points.shape
+
+        # only recon one mesh
+        if B_inv.shape[0] > 1:
+            B_inv = B_inv[0].unsqueeze(0)
+            T_0 = T_0[0].unsqueeze(0)
 
         # sample points [B, N, 1, 4, 1]
         X = torch.cat((points, 
@@ -114,7 +119,7 @@ class Trainer():
         # data_BT [B, N, 21, 3]
 
         pred = self.net(data_BX, data_BT)[:,None,:]
-        pred = self.test_recon(points)
+        # pred = self.test_recon(points)
 
         # return [B, 1, N]
         return pred

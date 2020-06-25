@@ -9,6 +9,12 @@ import torch
 import torchvision
 import torch.nn.functional as F
 
+from lib.common.trainer import Trainer
+from lib.common.config import get_cfg_defaults
+from lib.dataset.AMASSdataset import AMASSdataset
+from lib.net.DeepSDF import Net
+from lib.net.seg3d_lossless import Seg3dLossless
+
 sys.path.insert(0, '../')
 
 def find_vertices(sdf, direction="front"):
@@ -96,7 +102,6 @@ class TestEngine():
         with torch.no_grad():
 
             # forward
-
             sdf = self.reconEngine(priors=priors)[0,0]
             depth, height, width = sdf.size()
             # mask = F.interpolate(mask, size=(height, width))
@@ -109,19 +114,15 @@ class TestEngine():
             image2 = render_normal(self.resolutions[-1], X, Y, Z, norm)
             X, Y, Z, norm = find_vertices(sdf, direction="right")
             image3 = render_normal(self.resolutions[-1], X, Y, Z, norm)
+            X, Y, Z, norm = find_vertices(sdf, direction="back")
+            image4 = render_normal(self.resolutions[-1], X, Y, Z, norm)
 
-            image = torch.cat([image1, image2, image3], axis=3)
+            image = torch.cat([image1, image2, image3, image4], axis=3)
             image = image.cpu().numpy()[0].transpose(1, 2, 0) * 255.0
             return np.uint8(image)  # rgb
 
 
 if __name__ == '__main__':
-
-    from lib.common.trainer import Trainer
-    from lib.common.config import get_cfg_defaults
-    from lib.dataset.AMASSdataset import AMASSdataset
-    from lib.net.DeepSDF import Net
-    from lib.net.seg3d_lossless import Seg3dLossless
 
     
     parser = argparse.ArgumentParser()

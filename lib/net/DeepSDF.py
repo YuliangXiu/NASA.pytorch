@@ -12,14 +12,12 @@ class ResidualBlock(nn.Module):
         if not structured:
             self.conv_head = nn.Linear(3 * n_elements, width)
             self.conv_tail = nn.Linear(width, D_dim)
-            self.last_op = None
         else:
             self.conv_head = nn.Linear(3 + D_dim, width)
             self.conv_tail = nn.Linear(width, 1)
-            self.last_op = nn.Sigmoid()
 
         self.conv = nn.Linear(width, width)
-        self.bn = nn.BatchNorm1d(width)
+        self.bn = nn.LayerNorm(width)
         self.relu = nn.LeakyReLU(0.1)
 
         self.n_layers = n_layers
@@ -34,12 +32,10 @@ class ResidualBlock(nn.Module):
             out = self.bn(out)
             out = self.relu(out)
             out += residual
+
         out = self.conv_tail(out)
 
-        if self.last_op is not None:
-            return self.last_op(out)
-        else:
-            return out
+        return out
     
 
 class Net(nn.Module):
@@ -74,9 +70,9 @@ class Net(nn.Module):
             theta_out[:, [i]] = self.theta[i](
                 torch.cat((pi_out, data_bx[:,:,i,:].reshape(B*N,3)), dim=1))
         
-        theta_out = self.softmax(theta_out)
+        theta_out = torch.max(self.softmax(theta_out), dim=1)[0].reshape(B, N)
 
-        return theta_out.max(dim=1)[0].reshape(B, N)
+        return theta_out
 
 
 if __name__ == "__main__":

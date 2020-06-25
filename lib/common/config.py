@@ -14,6 +14,7 @@ _C.optim = 'RMSprop'
 _C.schedule = [40, 60]
 _C.gamma = 0.1
 _C.resume = False 
+_C.overfit = False
 
 # needed by train()
 _C.ckpt_path = ''
@@ -23,6 +24,7 @@ _C.num_epoch = 1
 _C.freq_plot = 10
 _C.freq_save = 100
 _C.freq_eval = 100
+_C.freq_show = 100
 
 _C.net = CN()
 _C.net.backbone = ''

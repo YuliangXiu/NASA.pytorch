@@ -26,6 +26,10 @@ from .hoppeMesh import HoppeMesh
 from .sample import sample_surface
 from .mesh_util import obj_loader
 
+# from hoppeMesh import HoppeMesh
+# from sample import sample_surface
+# from mesh_util import obj_loader
+
 import matplotlib.pyplot as plt
 
 def projection(points, calib):
@@ -36,7 +40,8 @@ class AMASSdataset(Dataset):
 
     def __init__(self, opt, split, num_betas=16):
 
-        self.opt = opt
+        self.opt = opt.dataset
+        self.overfit = opt.overfit
         self.num_betas = num_betas
         self.num_poses = 21
         self.bm_path = os.path.dirname(os.path.abspath(__file__)) + \
@@ -52,6 +57,8 @@ class AMASSdataset(Dataset):
        return len(self.ds['trans'])
 
     def __getitem__(self, idx):
+        if self.overfit:
+            idx = 0 # for overfitting
         data_dict =  {k: self.ds[k][idx] for k in self.ds.keys()}
         data_dict['root_orient'] = data_dict['pose'][:3]
         data_dict['pose_body'] = data_dict['pose'][3:66]
@@ -64,6 +71,7 @@ class AMASSdataset(Dataset):
         data_dict.update(self.get_sampling_geo(data_dict))
 
         # data_dict['A'] [22, 4, 4] bone transform matrix wrt root
+
         # [21, 4, 4] bone(w/o root) transform matrix
         B_inv = data_dict['A'][1:].inverse()
         # root location [4,]
@@ -221,5 +229,5 @@ if __name__ == '__main__':
     # with tinyobj loader 5.27 iter/s
     import tqdm
     for data_dict in tqdm.tqdm(dataset):
-        data_dict["mesh"].export("mesh.obj")
+        print(data_dict)
         break
