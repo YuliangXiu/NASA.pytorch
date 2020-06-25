@@ -1,16 +1,19 @@
-# trainer.pytorch
+# NASA.PyTorch
 
-A tiny but handy training code base for general tasks, written in pytorch. Features in this codes are:
+This is a PyTorch implementation of [NASA: Neural Articulated Shape Approximation](https://arxiv.org/abs/1912.03207)
 
-- support tensorboardx by default.
-- support logger & timing by default.
-- support multi-gpu (nn.DataParallel) by default.
-- support checkpoint resuming (including optimizer, options etc) by default.
-- support config file *.yaml and command line config at the same time. (see train_net.sh for example)
+![results](results.gif)
 
-The purpose of this code base is you don't need to write those same things again and again for different projects. So I make this code base as general as possible. All you need to change is the network defination and dataset defination in `train.py`. (Search for `TODO` in `train.py` to see where you need to change for your task.)
+## Requirements
+- [Human Pose Prior[modified version]](https://github.com/YuliangXiu/human_body_prior)
+- [AMASS](https://github.com/nghorbani/amass)
 
-You can also add your task-specific default configs to `lib/common/configs.py`, and use either *.yaml or command lines to overwrite those configs. (see train_net.sh for example)
+## Related works
+- [AMASS: Archive of Motion Capture as Surface Shapes](https://amass.is.tue.mpg.de/)
+- [Expressive Body Capture: 3D Hands, Face, and Body from a Single Image](https://smpl-x.is.tue.mpg.de/)
+- [Implicit Functions in Feature Space for 3D Shape Reconstruction and Completion](https://virtualhumans.mpi-inf.mpg.de/publications.html)
 
+## Contact
+The code in this repository is developed by [Yuliang Xiu](http://xiuyuliang.cn/)
 
 

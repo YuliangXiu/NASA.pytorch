@@ -194,7 +194,7 @@ def train(device='cuda'):
                 test_engine = TestEngine(trainer.query_func, device)
                 render = test_engine(priors=data_dict)
                 images.append(np.flip(render[:, :, ::-1],axis=0))
-                imageio.mimsave(os.path.join(cfg.results_path, "results.gif"), images)
+                imageio.mimsave(os.path.join(cfg.results_path,cfg.name, "results.gif"), images)
                 trainer.tb_writer.add_image('Image', np.flip(render[:, :, ::-1],axis=0).transpose(2,0,1), global_step)
                 
             # save
