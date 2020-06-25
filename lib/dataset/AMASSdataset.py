@@ -1,4 +1,4 @@
-import os
+import os, sys
 
 import numpy as np
 from PIL import Image
@@ -38,6 +38,7 @@ class AMASSdataset(Dataset):
 
         self.opt = opt
         self.num_betas = num_betas
+        self.num_poses = 21
         self.bm_path = os.path.dirname(os.path.abspath(__file__)) + \
                                 '/amass/body_models/smplh/%s/model.npz'
         self.ds = {}
@@ -57,27 +58,36 @@ class AMASSdataset(Dataset):
         data_dict['pose_hand'] = data_dict['pose'][66:]
         data_dict['betas'] = data_dict['betas'][:self.num_betas]
 
+        self.num_poses = data_dict['pose_body'].shape[0] // 3
+
         data_dict.update(self.load_mesh(data_dict))
         data_dict.update(self.get_sampling_geo(data_dict))
 
-        # data_dict['A'] [22, 4, 4]
-        B_inv = data_dict['A'][1:].inverse() # [21, 4, 4]
-        T_0 = B_inv[:,:3,-1] # [21, 3]
+        # data_dict['A'] [22, 4, 4] bone transform matrix wrt root
+        # [21, 4, 4] bone(w/o root) transform matrix
+        B_inv = data_dict['A'][1:].inverse()
+        # root location [4,]
+        T_0 = data_dict['A'][0,:,-1]
+        # sample points [N, 1, 4, 1]
+        X = torch.cat((data_dict['samples_geo'], 
+            torch.ones(self.opt.num_sample_geo, 1)),dim=1)[:, None, :, None] 
 
-        # data_BX = torch.matmul(B_inv[:,None,:,:], torch.cat((data_dict['samples_geo'], 
-        #                                         torch.ones(self.opt.num_sample_geo, 1)),dim=1)[:, :, None])[:, :, :3, 0] 
-        #                                         # [21, 1, 4, 4] x [N, 4, 1] - > [21, N, 4, 1] -- > [21, N, 3]
+        # [21, 4, 4] x [N, 1, 4, 1] - > [N, 21, 4, 1] -- > [N, 21, 3]
+        data_BX = torch.matmul(B_inv, X)[:, :, :3, 0] 
 
-        data_BX = torch.matmul(torch.cat((data_dict['samples_geo'], 
-                                torch.ones(self.opt.num_sample_geo, 1)),dim=1)[:, None, None, :], 
-                                B_inv)[:, :, 0, :3] 
-                                # [N, 1, 1, 4] x [21, 4, 4] - > [N, 21, 1, 4] -- > [N, 21, 3]
+        # root location [1, 1, 4, 1] -- > [N, 1, 4, 1]
+        # [21, 4, 4] x [N, 1, 4, 1] - > [N, 21, 4, 1] -- > [N, 21, 3]
+        data_BT = torch.matmul(B_inv, T_0[None, None,:,None].repeat(
+            self.opt.num_sample_geo, 1, 1, 1))[:, :, :3, 0] 
 
-        data_BT = T_0.unsqueeze(0).repeat(self.opt.num_sample_geo,1,1) # [N, 21, 3]
-        # data_BT = T_0 # [21, 3]
-        targets = data_dict['labels_geo'] # [N, ]
+        # [N, ]
+        targets = data_dict['labels_geo']
 
-        return data_BX, data_BT, targets
+        return {'B_inv': B_inv,
+                'T_0': T_0,
+                'data_BX':data_BX, 
+                'data_BT':data_BT, 
+                'targets':targets}
 
     
     def load_mesh(self, data_dict):
@@ -107,7 +117,7 @@ class AMASSdataset(Dataset):
             vert_normals=vert_normals, 
             face_normals=face_normals)
 
-        return {'mesh': mesh, 'A': body.A[0,:22]}
+        return {'mesh': mesh, 'A': body.A[0,:self.num_poses+1]}
 
     def get_sampling_geo(self, data_dict):
         mesh = data_dict['mesh']
@@ -122,7 +132,7 @@ class AMASSdataset(Dataset):
         
         # Uniform samples in [-1, 1]
         b_min = np.array([-1.0, -1.0, -1.0])
-        b_max = np.array([1.0, 1.0, 1.0])
+        b_max = np.array([ 1.0,  1.0,  1.0])
         n_samples_space = self.opt.num_sample_geo // 4
         samples_space = np.random.rand(n_samples_space, 3) * (b_max - b_min) + b_min
         
@@ -186,7 +196,7 @@ class AMASSdataset(Dataset):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--root', type=str, default='../data/')
+    parser.add_argument('--root', type=str, default='./data/')
     parser.add_argument('--batch_size', type=int, default=10)
     parser.add_argument('--workers', type=int, default=10)
     parser.add_argument('--num_sample_geo', type=int, default=5000)
@@ -196,6 +206,8 @@ if __name__ == '__main__':
     dataset = AMASSdataset(args, split='vald')
     # dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.workers)
     # bdata = next(iter(dataloader))
+
+    # print(bdata['B_inv'].shape)
 
     # if args.num_sample_geo:
     #     dataset.visualize_sampling(data_dict, '../test_data/proj_geo.jpg', mode='geo')
@@ -208,6 +220,6 @@ if __name__ == '__main__':
     # speed 3.30 iter/s
     # with tinyobj loader 5.27 iter/s
     import tqdm
-    for data_BX, data_BT, target in tqdm.tqdm(dataset):
-        print(data_BX.shape, data_BT.shape, target.shape)
+    for data_dict in tqdm.tqdm(dataset):
+        data_dict["mesh"].export("mesh.obj")
         break

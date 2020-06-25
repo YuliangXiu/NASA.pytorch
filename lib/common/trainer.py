@@ -8,7 +8,6 @@ import torch.nn as nn
 from tensorboardX import SummaryWriter
 from .logger import colorlogger
 
-
 class Trainer():
     def __init__(self, net, opt=None, use_tb=True):
         self.opt = opt if opt is not None else Trainer.get_default_opt()
@@ -88,6 +87,64 @@ class Trainer():
             self.logger.info(f'loading for start epoch ... {self.epoch}')
             self.iteration = ckpt["iteration"]
             self.logger.info(f'loading for start iteration ... {self.iteration}')
+
+    def query_func(self, priors, points):
+
+        # points [B, N, 3]
+        # priors['B_inv'] [B, 21, 4, 4]
+        # priors['T_0'] [B, 4]
+
+        B_inv = priors['B_inv'].cuda()
+        T_0 = priors['T_0'].cuda()
+
+        B, N, _ = points.shape
+
+        # sample points [B, N, 1, 4, 1]
+        X = torch.cat((points, 
+            torch.ones(B, N, 1).cuda()),dim=2)[:, :, None, :, None] 
+
+        # [B, 1, 21, 4, 4] x [B, N, 1, 4, 1] - > [B, N, 21, 4, 1] -- > [B, N, 21, 3]
+        data_BX = torch.matmul(B_inv.unsqueeze(1), X)[:, :, :, :3, 0] 
+
+        # [B, 1, 21, 4, 4] x [B, N, 1, 4, 1] - > [B, N, 21, 4, 1] -- > [B, N, 21, 3]
+        data_BT = torch.matmul(B_inv.unsqueeze(1), T_0[:, None, None, :, None].repeat(
+                                                    1, N, 1, 1, 1))[:, :, :, :3, 0]    
+
+        # data_BX [B, N, 21, 3]
+        # data_BT [B, N, 21, 3]
+
+        pred = self.net(data_BX, data_BT)[:,None,:]
+        pred = self.test_recon(points)
+
+        # return [B, 1, N]
+        return pred
+
+    def test_recon(self, points):
+
+        from ..dataset.hoppeMesh import HoppeMesh
+        import trimesh
+        import numpy as np
+
+        mesh_ori = trimesh.load_mesh("/home/ICT2000/yxiu/Code/trainer.pytorch/mesh.obj")
+
+        rot_mat = trimesh.transformations.rotation_matrix(np.pi, [0,0,1])
+        mesh_ori = mesh_ori.apply_transform(rot_mat)
+        
+        verts = mesh_ori.vertices
+        vert_normals = mesh_ori.vertex_normals
+        face_normals = mesh_ori.face_normals
+        faces = mesh_ori.faces
+
+        mesh = HoppeMesh(
+            verts=verts, 
+            faces=faces, 
+            vert_normals=vert_normals, 
+            face_normals=face_normals)
+        pred = torch.Tensor(mesh.contains(
+            points.detach().cpu().numpy()[0])).cuda()[None,None,:]
+        
+        return pred
+
 
     @classmethod
     def get_default_opt(cls):

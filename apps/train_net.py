@@ -49,7 +49,9 @@ def test(net):
 
     with torch.no_grad():
         pbar = tqdm(test_loader)
-        for data_BX, data_BT, target in pbar:
+        for data_dict in pbar:
+            data_BX, data_BT, target = \
+                data_dict['data_BX'], data_dict['data_BT'], data_dict['target']
             data_BX = data_BX.cuda()
             data_BT = data_BT.cuda()
             target = target.cuda()
@@ -68,8 +70,17 @@ def test(net):
 
 
 def train(device='cuda'):
+
+    # set dataset
+    train_dataset = AMASSdataset(cfg.dataset, split="train")
+
+    train_data_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_size=cfg.batch_size, shuffle=True,
+        num_workers=cfg.num_threads, pin_memory=True, drop_last=True)
+
     # setup net 
-    net = Net(21, 4, 40, 4).to(device)
+    net = Net(train_dataset.num_poses, 4, 40, 4).to(device)
 
     # setup trainer
     trainer = Trainer(net, cfg, use_tb=True)
@@ -79,13 +90,6 @@ def train(device='cuda'):
     else:
         trainer.logger.info(f'ckpt {cfg.ckpt_path} not found.')
 
-    # set dataset
-    train_dataset = AMASSdataset(cfg.dataset, split="train")
-
-    train_data_loader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=cfg.batch_size, shuffle=True,
-        num_workers=cfg.num_threads, pin_memory=True, drop_last=True)
     trainer.logger.info(
         f'train data size: {len(train_dataset)}; '+
         f'loader size: {len(train_data_loader)};')
@@ -110,7 +114,9 @@ def train(device='cuda'):
             # data_BT [B, N, 21, 3]
             # theta_out [B, N, 21]
 
-            data_BX, data_BT, target = next(loader)  
+            data_dict = next(loader)  
+            data_BX, data_BT, target = \
+                data_dict['data_BX'], data_dict['data_BT'], data_dict['target']
                
             iter_data_time = time.time() - iter_start_time
             global_step = epoch * niter + iteration

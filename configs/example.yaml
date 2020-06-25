@@ -1,5 +1,5 @@
 name: first-try
-# ckpt_path: ../data/checkpoints/first-try/ckpt_0.pth
+ckpt_path: ../data/checkpoints/first-try/ckpt_0.pth
 dataset:
   root: ../data
   num_sample_geo: 2048
