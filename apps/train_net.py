@@ -11,6 +11,7 @@ import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
+import imageio
 
 sys.path.insert(0, '../')
 from lib.common.trainer import Trainer
@@ -37,14 +38,10 @@ cfg.freeze()
 
 
 
-def test(net, logger):
+def test(net, data_loader, trainer, global_step):
     net.eval()
-    # set dataset
-    test_dataset = AMASSdataset(cfg, split="test")
-    test_loader = torch.utils.data.DataLoader(
-        test_dataset,
-        batch_size=cfg.batch_size, shuffle=False,
-        num_workers=12, pin_memory=True)
+    
+    test_loader = data_loader
 
     test_loss = 0
     correct = 0
@@ -62,11 +59,11 @@ def test(net, logger):
             test_loss_sample = F.mse_loss(output_max, target).item()
 
             output_verts = output[:, -(cfg.dataset.num_verts):, :]
-            weights = data_dict['weights'].to(device)
+            weights = data_dict['weights'].cuda()
             
-            test_loss_skw = F.mse_loss(output_vertse, weights).item()
+            test_loss_skw = F.mse_loss(output_verts, weights).item()
 
-            test_loss += loss_sample + cfg.dataset.sk_ratio * loss_skw
+            test_loss += test_loss_sample + cfg.dataset.sk_ratio * test_loss_skw
 
             pred = output_max.data
             pred = pred.masked_fill(pred<0.5, 0.)
@@ -74,9 +71,13 @@ def test(net, logger):
 
             correct += pred.eq(target.data.view_as(pred)).float().mean()
 
-    test_loss /= len(test_loader.dataset)
-    logger.info('\nTest set: Avg. loss: {:.4f}, Accuracy: {:.2f}%\n'.format(
-        test_loss, 100. * correct / len(test_loader.dataset)))
+    test_loss /= len(test_loader)
+    correct /= len(test_loader)
+    trainer.logger.info('\nTest set: Avg. loss: {:.4f}, Accuracy: {:.2f}\n'.format(
+        test_loss, correct))
+    trainer.tb_writer.add_scalar('test/loss_total', test_loss, global_step)
+    trainer.tb_writer.add_scalar('test/acc', correct, global_step)
+                
 
 
 def train(device='cuda'):
@@ -88,6 +89,13 @@ def train(device='cuda'):
         train_dataset,
         batch_size=cfg.batch_size, shuffle=True,
         num_workers=cfg.num_threads, pin_memory=True, drop_last=True)
+
+    # set dataset
+    test_dataset = AMASSdataset(cfg, split="test")
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset,
+        batch_size=cfg.batch_size, shuffle=False,
+        num_workers=cfg.num_threads, pin_memory=True)
 
     # setup net 
     net = Net(train_dataset.num_poses, 4, 40, 4).to(device)
@@ -111,6 +119,8 @@ def train(device='cuda'):
 
     start_iter = trainer.iteration
     start_epoch = trainer.epoch
+
+    images = []
     # start training
     for epoch in range(start_epoch, cfg.num_epoch):
         trainer.net.train()
@@ -174,17 +184,19 @@ def train(device='cuda'):
                     +f'Err:{loss.item():.4f}|' \
                     +f'Prop:{correct.item():.5f}|'
                 )
-                trainer.tb_writer.add_scalar('data/loss_total', loss.item(), global_step)
-                trainer.tb_writer.add_scalar('data/loss_sample', loss_sample.item(), global_step)
-                trainer.tb_writer.add_scalar('data/loss_weight', loss_skw.item(), global_step)
-                trainer.tb_writer.add_scalar('data/prop', correct.item(), global_step)
+                trainer.tb_writer.add_scalar('train/loss_total', loss.item(), global_step)
+                trainer.tb_writer.add_scalar('train/loss_sample', loss_sample.item(), global_step)
+                trainer.tb_writer.add_scalar('train/loss_weight', loss_skw.item(), global_step)
+                trainer.tb_writer.add_scalar('train/acc', correct.item(), global_step)
             
             # update image
             if iteration % cfg.freq_show == 0 and iteration > 0:
                 test_engine = TestEngine(trainer.query_func, device)
                 render = test_engine(priors=data_dict)
+                images.append(np.flip(render[:, :, ::-1],axis=0))
+                imageio.mimsave(os.path.join(cfg.results_path, "results.gif"), images)
                 trainer.tb_writer.add_image('Image', np.flip(render[:, :, ::-1],axis=0).transpose(2,0,1), global_step)
-
+                
             # save
             if iteration % cfg.freq_save == 0 and iteration > 0 and not cfg.overfit:
                 trainer.update_ckpt(
@@ -193,7 +205,7 @@ def train(device='cuda'):
             # evaluation
             if iteration % cfg.freq_eval == 0 and iteration > 0 and not cfg.overfit:
                 trainer.net.eval()
-                test(trainer.net.module, trainer.logger)
+                test(trainer.net.module, test_loader, trainer, global_step)
                 trainer.net.train()
 
             # end
