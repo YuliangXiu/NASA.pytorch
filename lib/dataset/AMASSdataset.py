@@ -91,12 +91,20 @@ class AMASSdataset(Dataset):
         targets = data_dict['labels_geo']
 
         # [num_verts, 21]
-        vert_idx = data_dict['samples_verts_idx']
-        weights = torch.Tensor(data_dict['weights'][vert_idx,1:self.num_poses+1])
-        weights_one_hot = torch.nn.functional.one_hot(weights.max(dim=1)[1]) * 0.5
+        weights = data_dict['samples_verts_weights']
+        weights_label = weights.max(dim=1)[1]
+
+        # label all keypoints of hands as same
+        weights_label[(weights_label>=21) & (weights_label<36)] = 19
+        weights_label[(weights_label>=36) & (weights_label<51)] = 20
+
+        weights_one_hot = torch.nn.functional.one_hot(weights_label) * 0.5
 
         return {'B_inv': B_inv,
                 'T_0': T_0,
+                # 'weights_label': weights_label,
+                # 'samples_verts': data_dict['samples_verts'],
+                # 'joints': data_dict['joints'],
                 'weights': weights_one_hot,
                 'data_BX':data_BX, 
                 'data_BT':data_BT, 
@@ -109,15 +117,18 @@ class AMASSdataset(Dataset):
 
         with torch.no_grad():
             bm = BodyModel(bm_path=self.bm_path%(gender_type), num_betas=self.num_betas, batch_size=1)
-            body = bm.forward(pose_body=data_dict['pose_body'].unsqueeze(0), 
-                            betas=data_dict['betas'].unsqueeze(0))
-
-        mesh_ori = trimesh.Trimesh(vertices=c2c(body.v)[0], faces=c2c(body.f))
+            # body = bm.forward(pose_body=data_dict['pose_body'].unsqueeze(0), 
+            #                 betas=data_dict['betas'].unsqueeze(0))
+            body = bm.forward(pose_body=data_dict['pose_body'].unsqueeze(0))
 
         # move the mesh to the original
         joints = c2c(body.Jtr)[0]
-        root_xyz = joints[0]
-        mesh_ori.vertices -= root_xyz
+        root_xyz = joints[0].copy()
+        joints -= root_xyz
+       
+        mesh_ori = trimesh.Trimesh(vertices=c2c(body.v)[0]-root_xyz, 
+                                faces=c2c(body.f), 
+                                process=False)
 
         verts = mesh_ori.vertices
         vert_normals = mesh_ori.vertex_normals
@@ -131,11 +142,13 @@ class AMASSdataset(Dataset):
             face_normals=face_normals)
 
         return {'mesh': mesh, 
+                # 'joints': joints[1:self.num_poses+1],
                 'A': body.A[0,:self.num_poses+1],
-                'weights': body.weights}
+                'weights': body.weights[:,1:]}
 
     def get_sampling_geo(self, data_dict):
         mesh = data_dict['mesh']
+        weights = data_dict['weights'] #[6890, 52]
 
         # Samples are around the true surface with an offset
         n_samples_surface = 4 * self.opt.num_sample_geo
@@ -147,8 +160,9 @@ class AMASSdataset(Dataset):
 
         samples_verts_idx = np.random.choice(np.arange(mesh.verts.shape[0]),
                             self.opt.num_verts, replace=False)
-        samples_verts = mesh.verts[samples_verts_idx,:]
-        
+        samples_verts = mesh.verts[samples_verts_idx, :]
+        samples_verts_weights = weights[samples_verts_idx, :]
+                
         # Uniform samples in [-1, 1]
         b_min = np.array([-1.0, -1.0, -1.0])
         b_max = np.array([ 1.0,  1.0,  1.0])
@@ -183,32 +197,37 @@ class AMASSdataset(Dataset):
 
         return {
             'samples_geo': torch.Tensor(samples), 
-            'samples_verts_idx': samples_verts_idx,
+            # 'samples_verts': torch.Tensor(samples_verts),
+            'samples_verts_weights': torch.Tensor(samples_verts_weights),
             'labels_geo': torch.Tensor(labels),
         }
 
 
-    def visualize_sampling3D(self, data_dict):
+    def visualize_sampling3D(self, data_dict, only_pc=False):
         import vtkplotter
+        from matplotlib import cm
+
+        cmap = cm.get_cmap('jet')
         samples = data_dict[f'samples_geo']
         labels = data_dict[f'labels_geo']
-        colors = np.stack([labels, labels, labels], axis=1)
-     
-        mesh = data_dict['mesh']
-        faces = mesh.faces
+        colors = cmap(labels/labels.max())[:,:3]
 
         # [-1, 1]
         points = samples
-        verts = mesh.verts
         
         # create plot
         vp = vtkplotter.Plotter(title="", size=(1500, 1500))
         vis_list = []
 
-        # create a mesh
-        mesh = trimesh.Trimesh(verts, faces)
-        mesh.visual.face_colors = [200, 200, 250, 255]
-        vis_list.append(mesh)
+        if not only_pc:
+            # create a mesh
+            mesh = data_dict['mesh']
+            faces = mesh.faces
+            verts = mesh.verts
+
+            mesh = trimesh.Trimesh(verts, faces)
+            mesh.visual.face_colors = [200, 200, 250, 255]
+            vis_list.append(mesh)
 
         # create a pointcloud
         pc = vtkplotter.Points(points, r=12, c=np.float32(colors))
@@ -253,5 +272,20 @@ if __name__ == '__main__':
     # with tinyobj loader 5.27 iter/s
     import tqdm
     for data_dict in tqdm.tqdm(dataset):
-        print(data_dict['targets'])
+        print(data_dict['weights_label'].shape, type(data_dict['weights_label']))
+        # print(data_dict['joints'].shape, type(data_dict['joints']))
+        print(data_dict['samples_verts'].shape, type(data_dict['samples_verts']))
+
+        
+        new_data_dict = {}
+        new_data_dict['samples_geo'] = data_dict['samples_verts'].detach().cpu().numpy()
+        new_data_dict['labels_geo']= data_dict['weights_label'].detach().cpu().numpy()
+        dataset.visualize_sampling3D(new_data_dict, only_pc=True)
+
+        joints  = data_dict['joints']
+        new_data_dict['samples_geo'] = joints
+        new_data_dict['labels_geo']= np.arange(joints.shape[0])
+        dataset.visualize_sampling3D(new_data_dict, only_pc=True)
+
+
         break
