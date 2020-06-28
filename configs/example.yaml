@@ -1,25 +1,25 @@
-name: virgin_sk
+name: virgin_light
 dataset:
-  root: ../../data
+  root: ../data
   num_sample_geo: 2048
   sigma_geo: 0.05
   num_verts: 2048
-  sk_ratio: 5.0
+  sk_ratio: 0.5
 
-learning_rate: 1e-4 
+learning_rate: 1e-3
 batch_size: 24
 num_threads: 24
 
-ckpt_path: ../data/checkpoints/virgin/ckpt_13.pth
-resume: False
+# ckpt_path: ../data/checkpoints/virgin_light/top_k_epoch=1.ckpt
+# resume: True
 overfit: False
 
 momentum: 0.5 
 optim: Adam
 
-num_epoch: 20
+num_epoch: 15
 freq_eval: 1000
 freq_plot: 10
 freq_show: 200
 freq_save: 500
-schedule: [7, 18]
+schedule: [4, 7, 13]

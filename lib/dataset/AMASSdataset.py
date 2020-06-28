@@ -95,8 +95,8 @@ class AMASSdataset(Dataset):
         weights_label = weights.max(dim=1)[1]
 
         # label all keypoints of hands as same
-        weights_label[(weights_label>=22) & (weights_label<37)] = 20
-        weights_label[(weights_label>=37) & (weights_label<52)] = 21
+        weights_label[(weights_label>=21) & (weights_label<36)] = 19
+        weights_label[(weights_label>=36) & (weights_label<51)] = 20
 
         weights_one_hot = torch.nn.functional.one_hot(weights_label) * 0.5
 
@@ -143,7 +143,7 @@ class AMASSdataset(Dataset):
         return {'mesh': mesh, 
                 # 'joints': joints[1:self.num_poses+1],
                 'A': body.A[0,:self.num_poses+1],
-                'weights': body.weights}
+                'weights': body.weights[:,1:]}
 
     def get_sampling_geo(self, data_dict):
         mesh = data_dict['mesh']

@@ -146,7 +146,7 @@ class Seg3dLossless(nn.Module):
             coords2D = coords.float() / (self.resolutions[-1] - 1)
         else:
             step = 1.0 / self.resolutions[-1].float()
-            coords2D = coords.float() / self.resolutions[-1] + step / 2
+            coords2D = coords.float() / self.resolutions[-1] + step // 2
         coords2D = coords2D * (self.b_max - self.b_min) + self.b_min
         
         # query function

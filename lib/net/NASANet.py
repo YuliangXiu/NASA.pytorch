@@ -38,9 +38,9 @@ class ResidualBlock(nn.Module):
         return out
     
 
-class Net(nn.Module):
+class NASANet(nn.Module):
     def __init__(self, n_elements, n_layers, width, D_dim):
-        super(Net, self).__init__()
+        super(NASANet, self).__init__()
 
         self.n_elements = n_elements
         self.theta = nn.ModuleList()
@@ -73,6 +73,6 @@ class Net(nn.Module):
 
 
 if __name__ == "__main__":
-    net = Net(21, 4, 40, 4).to("cuda")
+    net = NASANet(21, 4, 40, 4).to("cuda")
     data_bx, data_bt = torch.randn(12, 5000, 21, 3), torch.randn(12, 5000, 21, 3)
     net.forward(data_bx.to("cuda"), data_bt.to("cuda"))
