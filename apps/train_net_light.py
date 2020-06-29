@@ -29,7 +29,7 @@ class LightNASA(pl.LightningModule):
     def __init__(self, **kwargs):
         super(LightNASA, self).__init__()
         self.model = NASANet(**kwargs)
-
+        self.model_kwargs = kwargs
         self.testor = TestEngine(self.query_func)
         self.global_step = 0
         self.batch_size = cfg.batch_size
@@ -39,6 +39,12 @@ class LightNASA(pl.LightningModule):
 
     def forward(self, data_bx, data_bt):
         return self.model.forward(data_bx, data_bt)
+
+    def get_progress_bar_dict(self):
+        tqdm_dict = super().get_progress_bar_dict()
+        if 'v_num' in tqdm_dict:
+            del tqdm_dict['v_num']
+        return tqdm_dict
 
     def query_func(self, priors, points):
     
@@ -146,8 +152,6 @@ class LightNASA(pl.LightningModule):
         if self.static_test_batch is None:
             self.static_test_batch = batch
 
-        self.global_step = self.current_epoch * (len(self.train_dataset) // self.batch_size) + batch_idx
-
         data_BX, data_BT, target, weights = \
                 batch['data_BX'], \
                 batch['data_BT'], \
@@ -184,7 +188,7 @@ class LightNASA(pl.LightningModule):
                         'lr': self.scheduler.get_last_lr()[0],
                         'l_pc': loss_sample,
                         'l_sk': loss_skw,
-                        'acc': acc}
+                        'p0': acc*100.0}
 
 
             if batch_idx % cfg.freq_show == 0:
@@ -229,18 +233,29 @@ class LightNASA(pl.LightningModule):
 
 
     def validation_epoch_end(self, outputs):
-        # called at the end of the validation epoch
-        # outputs is an array with what you returned in validation_step for each batch
-        # outputs = [{'loss': batch_0_loss}, {'loss': batch_1_loss}, ..., {'loss': batch_n_loss}] 
         avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
         avg_acc = torch.stack([x['val_acc'] for x in outputs]).mean()
         
         logs = {'val/loss': avg_loss, 
                 'val/acc': avg_acc}
 
+        logs_bar = {'l_val': avg_loss, 
+                'p1': avg_acc*100.0}
+
+        hparams = {'lr': self.scheduler.get_last_lr()[0],
+                  'epoch': self.current_epoch,
+                  'step': self.global_step,
+                  'optim': cfg.optim,
+                  'sk_ratio': cfg.dataset.sk_ratio}
+
+        hparams.update(self.model_kwargs)
+
+        self.logger.experiment.add_hparams(hparam_dict=hparams,
+                                        metric_dict=logs)
+
         return {'avg_val_loss': avg_loss, 
                 'log': logs, 
-                'progress_bar': logs}
+                'progress_bar': logs_bar}
 
     def test_step(self, batch, batch_idx):
         
@@ -270,12 +285,12 @@ class LightNASA(pl.LightningModule):
     def test_epoch_end(self, outputs):
         avg_loss = torch.stack([x['test_loss'] for x in outputs]).mean()
         avg_acc = torch.stack([x['test_acc'] for x in outputs]).mean()
+        
         logs = {'test/loss': avg_loss, 
                 'test/acc': avg_acc}
 
         return {'avg_test_loss': avg_loss, 
-                'log': logs, 
-                'progress_bar': logs} 
+                'log': logs} 
 
     
 
@@ -298,7 +313,7 @@ if __name__ == '__main__':
 
     checkpoint = ModelCheckpoint(
         filepath=osp.join(cfg.checkpoints_path, cfg.name),
-        save_top_k=3,
+        save_top_k=5,
         verbose=True,
         monitor='avg_val_loss',
         mode='min',
@@ -318,13 +333,13 @@ if __name__ == '__main__':
         def on_train_end(self, trainer, pl_module):
             print("Training is done.\n")
 
-    kwargs = {
+    trainer_kwargs = {
         'gpus':1,
         'logger':tb_logger,
         'callbacks':[LogCallback()],
         'checkpoint_callback':checkpoint,
         'progress_bar_refresh_rate':1,
-        'limit_train_batches':0.1,
+        'limit_train_batches':1.0,
         'limit_val_batches':0.1,
         'limit_test_batches':1.0,
         'profiler':True,
@@ -335,20 +350,31 @@ if __name__ == '__main__':
         'log_save_interval':cfg.freq_save
     }
 
-    trainer = pl.Trainer(**kwargs)
+    model_kwargs = {
+        'n_elements':21,
+        'n_layers':4,
+        'width':40,
+        'D_dim':4
+    }
+
+    model = LightNASA(**model_kwargs)
+    trainer = pl.Trainer(**trainer_kwargs)
 
     if cfg.overfit:
-        kwargs['overfit_batches'] = 2
-        trainer = pl.Trainer(**kwargs)
-
+        trainer_kwargs['overfit_batches'] = 2
+        trainer = pl.Trainer(**trainer_kwargs)
+        
     if cfg.resume and osp.exists(cfg.ckpt_path):
-        kwargs['resume_from_checkpoint'] = cfg.ckpt_path
-        trainer = pl.Trainer(**kwargs)
+        trainer_kwargs['resume_from_checkpoint'] = cfg.ckpt_path
+        trainer = pl.Trainer(**trainer_kwargs)
+        model.tmux_logger.info(f'Loading weights+params from {cfg.ckpt_path}.')
     elif not cfg.resume and osp.exists(cfg.ckpt_path):
-        trainer.load_from_checkpoint(cfg.ckpt_path)
+        model.load_state_dict(torch.load(cfg.ckpt_path)['state_dict'])
+        model.tmux_logger.info(f'Loading only weights from {cfg.ckpt_path}.')
     else:
-        print(f'ckpt {cfg.ckpt_path} not found.')
+        model.tmux_logger.info(f'ckpt {cfg.ckpt_path} not found.')
+
+    if not cfg.test_mode:
+        trainer.fit(model)
     
-    model = LightNASA(n_elements=21, n_layers=4, width=40, D_dim=4)
-    trainer.fit(model)
-    trainer.test()
+    trainer.test(model)
