@@ -17,7 +17,7 @@ sys.path.insert(0, '../')
 from lib.common.trainer import Trainer
 from lib.common.config import get_cfg_defaults
 from lib.dataset.AMASSdataset import AMASSdataset
-from lib.net.NASANet import Net
+from lib.net.NASANet import NASANet
 from lib.net.test_net import TestEngine
 
 parser = argparse.ArgumentParser()
@@ -98,7 +98,7 @@ def train(device='cuda'):
         num_workers=cfg.num_threads, pin_memory=True)
 
     # setup net 
-    net = Net(train_dataset.num_poses, 4, 40, 4).to(device)
+    net = NASANet(train_dataset.num_poses, 4, 40, 4).to(device)
 
     # setup trainer
     trainer = Trainer(net, cfg, use_tb=True)
