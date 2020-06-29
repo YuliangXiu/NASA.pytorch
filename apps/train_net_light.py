@@ -343,7 +343,7 @@ if __name__ == '__main__':
         'limit_val_batches':0.1,
         'limit_test_batches':1.0,
         'profiler':True,
-        'fast_dev_run':False,
+        'fast_dev_run':True,
         'max_epochs':cfg.num_epoch,
         'val_check_interval':cfg.freq_eval,
         'row_log_interval':cfg.freq_plot,
