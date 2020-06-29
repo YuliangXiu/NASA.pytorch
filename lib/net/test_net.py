@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from lib.common.trainer import Trainer
 from lib.common.config import get_cfg_defaults
 from lib.dataset.AMASSdataset import AMASSdataset
-from lib.net.DeepSDF import Net
+from lib.net.NASANet import NASANet
 from lib.net.seg3d_lossless import Seg3dLossless
 
 sys.path.insert(0, '../')
@@ -78,15 +78,14 @@ def render_normal(resolution, X, Y, Z, norm):
     image =  torch.ones(
         (1, 3, resolution, resolution), dtype=torch.float32
     ).to(norm.device)  
-    color = (norm + 1) / 2 
+    color = (norm + 1) / 2.0 
     color = color.clamp(0, 1)
     image[0, :, Y, X] = color.t()
     return image
 
 
 class TestEngine():
-    def __init__(self, query_func, device):
-        self.device = device
+    def __init__(self, query_func):
         self.resolutions = [16+1, 32+1, 64+1, 128+1, 256+1]
         self.reconEngine = Seg3dLossless(
             query_func=query_func, 
@@ -95,7 +94,7 @@ class TestEngine():
             resolutions=self.resolutions,
             balance_value=0.5,
             visualize=False,
-            faster=True).to(device)
+            faster=True).cuda()
 
     def __call__(self, priors):
 
@@ -147,7 +146,7 @@ if __name__ == '__main__':
     bdata = next(iter(test_loader))
 
     # setup net 
-    net = Net(21, 4, 40, 4).to(device)
+    net = NASANet(21, 4, 40, 4).to(device)
     trainer = Trainer(net, cfg, use_tb=True)
     trainer.load_ckpt(
         os.path.join(trainer.checkpoints_path, 'ckpt_3.pth'))

@@ -17,7 +17,7 @@ sys.path.insert(0, '../')
 from lib.common.trainer import Trainer
 from lib.common.config import get_cfg_defaults
 from lib.dataset.AMASSdataset import AMASSdataset
-from lib.net.DeepSDF import Net
+from lib.net.NASANet import Net
 from lib.net.test_net import TestEngine
 
 parser = argparse.ArgumentParser()
@@ -121,6 +121,7 @@ def train(device='cuda'):
     start_epoch = trainer.epoch
 
     images = []
+    data_dict_for_show = None
     # start training
     for epoch in range(start_epoch, cfg.num_epoch):
         trainer.net.train()
@@ -139,6 +140,10 @@ def train(device='cuda'):
             # data_BT [B, N, 21, 3]
 
             data_dict = next(loader)  
+
+            if data_dict_for_show is None:
+                data_dict_for_show = data_dict
+
             data_BX, data_BT, target = \
                 data_dict['data_BX'], data_dict['data_BT'], data_dict['targets']
                
@@ -192,7 +197,7 @@ def train(device='cuda'):
             # update image
             if iteration % cfg.freq_show == 0 and iteration > 0:
                 test_engine = TestEngine(trainer.query_func, device)
-                render = test_engine(priors=data_dict)
+                render = test_engine(priors=data_dict_for_show)
                 images.append(np.flip(render[:, :, ::-1],axis=0))
                 imageio.mimsave(os.path.join(cfg.results_path,cfg.name, "results.gif"), images)
                 trainer.tb_writer.add_image('Image', np.flip(render[:, :, ::-1],axis=0).transpose(2,0,1), global_step)

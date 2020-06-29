@@ -15,6 +15,7 @@ _C.schedule = [40, 60]
 _C.gamma = 0.1
 _C.resume = False 
 _C.overfit = False
+_C.test_mode = False
 
 # needed by train()
 _C.ckpt_path = ''
