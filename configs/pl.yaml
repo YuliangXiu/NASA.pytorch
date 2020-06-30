@@ -1,26 +1,30 @@
-name: virgin_light_NASA
+name: NASA_pl
 dataset:
   root: ../data
   num_sample_geo: 2048
   sigma_geo: 0.05
   num_verts: 2048
   sk_ratio: 0.5
+  train_bsize: 1.0
+  val_bsize: 0.2
+  test_bsize: 1.0
 
-learning_rate: 1e-5
+learning_rate: 1e-4
 batch_size: 24
 num_threads: 24
 
-# ckpt_path: ../data/checkpoints/virgin_light/top_k_epoch=0.ckpt
-resume: False
-overfit: False
+ckpt_path: ../data/checkpoints/NASA_pl/top_k_epoch=5.ckpt
+overfit: 0
+resume: True
 test_mode: False
+fast_dev: False
 
 momentum: 0.5 
-optim: Adam
+optim: SGD
 
-num_epoch: 15
+num_epoch: 10
 freq_eval: 1000
-freq_plot: 10
+freq_plot: 100
 freq_show: 200
 freq_save: 500
-schedule: [4, 7, 13]
+schedule: [4, 7]

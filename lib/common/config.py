@@ -14,8 +14,9 @@ _C.optim = 'RMSprop'
 _C.schedule = [40, 60]
 _C.gamma = 0.1
 _C.resume = False 
-_C.overfit = False
+_C.overfit = 0
 _C.test_mode = False
+_C.fast_dev = False
 
 # needed by train()
 _C.ckpt_path = ''
@@ -36,6 +37,10 @@ _C.dataset.num_sample_geo = 5000
 _C.dataset.sigma_geo = 0.05
 _C.dataset.num_verts = 2048
 _C.dataset.sk_ratio = 1.0
+
+_C.dataset.train_bsize = 1.0
+_C.dataset.val_bsize = 1.0
+_C.dataset.test_bsize = 1.0
 
 
 def get_cfg_defaults():

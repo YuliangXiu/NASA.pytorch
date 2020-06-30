@@ -9,7 +9,7 @@ import torch
 import torchvision
 import torch.nn.functional as F
 
-from lib.common.trainer import Trainer
+# from lib.common.trainer import Trainer
 from lib.common.config import get_cfg_defaults
 from lib.dataset.AMASSdataset import AMASSdataset
 from lib.net.NASANet import NASANet
