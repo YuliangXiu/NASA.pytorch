@@ -85,8 +85,9 @@ def render_normal(resolution, X, Y, Z, norm):
 
 
 class TestEngine():
-    def __init__(self, query_func):
+    def __init__(self, query_func, device):
         self.resolutions = [16+1, 32+1, 64+1, 128+1, 256+1]
+        self.device = device
         self.reconEngine = Seg3dLossless(
             query_func=query_func, 
             b_min=[[-1.0, -1.0, -1.0]],
@@ -95,7 +96,7 @@ class TestEngine():
             balance_value=0.5,
             visualize=False,
             export_mesh=True,
-            faster=True).cuda()
+            faster=True).to(self.device)
 
     def __call__(self, priors):
 

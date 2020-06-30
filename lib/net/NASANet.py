@@ -59,7 +59,7 @@ class NASANet(nn.Module):
         # theta_out [B, N, 21]
 
         B, N = data_bt.shape[:2]
-        theta_out = torch.randn(B*N, self.n_elements).cuda()
+        theta_out = torch.randn(B*N, self.n_elements).to(data_bx.device)
 
         for i in range(self.n_elements):
             pi_out = self.pi[i](

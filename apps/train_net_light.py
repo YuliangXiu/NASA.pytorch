@@ -4,6 +4,7 @@ import os.path as osp
 import argparse
 from tqdm import tqdm
 import torch
+import trimesh
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
@@ -15,6 +16,7 @@ sys.path.insert(0, '../')
 from lib.common.config import get_cfg_defaults
 from lib.common.logger import colorlogger
 from lib.dataset.AMASSdataset import AMASSdataset
+from lib.dataset.hoppeMesh import HoppeMesh
 from lib.net.NASANet import NASANet
 from lib.net.test_net import TestEngine
 
@@ -30,11 +32,11 @@ class LightNASA(pl.LightningModule):
         super(LightNASA, self).__init__()
         self.model = NASANet(**kwargs)
         self.model_kwargs = kwargs
-        self.testor = TestEngine(self.query_func)
         self.global_step = 0
         self.batch_size = cfg.batch_size
         self.static_test_batch = None
         self.images = []
+        self.testor = None
         self.tmux_logger = colorlogger(logdir=osp.join(cfg.results_path, cfg.name)) 
 
         self.hparams = {'lr': cfg.learning_rate,
@@ -57,8 +59,8 @@ class LightNASA(pl.LightningModule):
 
     def query_func(self, priors, points):
     
-        B_inv = priors['B_inv'].cuda()
-        T_0 = priors['T_0'].cuda()
+        B_inv = priors['B_inv'].to(self.device)
+        T_0 = priors['T_0'].to(self.device)
 
         B, N, _ = points.shape
 
@@ -67,7 +69,7 @@ class LightNASA(pl.LightningModule):
             T_0 = T_0[0].unsqueeze(0)
 
         X = torch.cat((points, 
-            torch.ones(B, N, 1).cuda()),dim=2)[:, :, None, :, None] 
+            torch.ones(B, N, 1).to(self.device)),dim=2)[:, :, None, :, None] 
 
         data_BX = torch.matmul(B_inv.unsqueeze(1), X)[:, :, :, :3, 0] 
         data_BT = torch.matmul(B_inv.unsqueeze(1), T_0[:, None, None, :, None].repeat(
@@ -75,7 +77,32 @@ class LightNASA(pl.LightningModule):
         pred = self.forward(data_BX, data_BT)
         pred_max = torch.max(pred, dim=2)[0][:,None,:]
 
+        # fake reconstruction from original mesh
+        # pred_max = self.fake_recon(points)
+
         return pred_max
+
+    def fake_recon(self, points):
+
+        mesh_ori = trimesh.load_mesh(osp.join(osp.dirname(__file__), "../data/mesh.obj"))
+
+        rot_mat = trimesh.transformations.rotation_matrix(np.pi, [0,0,1])
+        mesh_ori = mesh_ori.apply_transform(rot_mat)
+        
+        verts = mesh_ori.vertices
+        vert_normals = mesh_ori.vertex_normals
+        face_normals = mesh_ori.face_normals
+        faces = mesh_ori.faces
+
+        mesh = HoppeMesh(
+            verts=verts, 
+            faces=faces, 
+            vert_normals=vert_normals, 
+            face_normals=face_normals)
+        pred = torch.Tensor(mesh.contains(
+            points.detach().cpu().numpy()[0])).to(self.device)[None,None,:]
+        
+        return pred
 
     # Dataset related
 
@@ -159,6 +186,7 @@ class LightNASA(pl.LightningModule):
     def training_step(self, batch, batch_idx):
 
         if self.static_test_batch is None:
+            self.testor = TestEngine(self.query_func, self.device)
             self.static_test_batch = batch
             self.logger.experiment.add_graph(self.model, 
                                     (batch['data_BX'], batch['data_BT']))
@@ -214,15 +242,11 @@ class LightNASA(pl.LightningModule):
                         img_tensor=np.flip(render[:, :, ::-1],axis=0).transpose(2,0,1), 
                         global_step=self.global_step)
 
-                self.tmux_logger.info(f'\nverts: {verts.shape}, {verts.type()}, {verts.max(dim=0)[0]}, {verts.min(dim=0)[0]}\n' \
-                                    +f'\nfaces: {faces.shape}, {faces.type()}, {faces.max(dim=0)[0]}, {faces.min(dim=0)[0]}\n' \
-                                    +f'\ncolrs: {colrs.shape}, {colrs.type()}, {colrs.max(dim=0)[0]}, {colrs.min(dim=0)[0]}\n')
-                
                 self.logger.experiment.add_mesh(
                         tag=f'mesh/{self.global_step}',
                         vertices=verts.unsqueeze(0),
                         faces=faces.unsqueeze(0),
-                        colors=colrs.unsqueeze(0),
+                        colors=(colrs.unsqueeze(0)*255).int(),
                         global_step=self.global_step)
 
         return {'loss': loss, 'log': logs, 'progress_bar': logs_bar}
@@ -306,7 +330,6 @@ class LightNASA(pl.LightningModule):
 
         return {'log': metrics} 
 
-    
 
 if __name__ == '__main__':
 
@@ -357,7 +380,7 @@ if __name__ == '__main__':
         'limit_val_batches':cfg.dataset.val_bsize,
         'limit_test_batches':cfg.dataset.test_bsize,
         'profiler':True,
-        'num_sanity_val_steps':1,
+        'num_sanity_val_steps':0,
         'fast_dev_run':cfg.fast_dev,
         'max_epochs':cfg.num_epoch,
         'val_check_interval':cfg.freq_eval,

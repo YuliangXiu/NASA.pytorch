@@ -2,6 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from lib.net.mcubes import marching_cubes, grid_interp
+import numpy as np
+from skimage import measure
+
 def plot_mask3D(
     mask=None, title="", point_coords=None, figsize=1500, point_marker_size=8,
     interactive=True):
@@ -497,9 +501,6 @@ class Seg3dLossless(nn.Module):
             final[0, 0].to("cpu"), title, (x, y, z), **kwargs)
 
     def export_mesh_func(self, occupancys, final_D, final_H, final_W):
-        from lib.net.mcubes import marching_cubes, grid_interp
-        import numpy as np
-        from skimage import measure
 
         final = F.interpolate(
             occupancys.float(), size=(final_D, final_H, final_W), 
@@ -515,11 +516,13 @@ class Seg3dLossless(nn.Module):
 
         rgb = np.stack((x, y, z), axis=-1)
         rgb = np.transpose(rgb, axes=(3, 2, 1, 0)).copy()
-        rgb = torch.from_numpy(rgb).cuda()
+        rgb = torch.from_numpy(rgb).to(final.device)
 
         verts, faces = marching_cubes(final, self.balance_value)
         faces = faces[:,[0,2,1]]
 
+        # faces = torch.stack([face for face in faces if len(set(list(face)))==3],dim=0)
+        
         ## marching cube (CPU version)
         # from skimage import measure
         # verts, faces, normals, values = measure.marching_cubes_lewiner(
