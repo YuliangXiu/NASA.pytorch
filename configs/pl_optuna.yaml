@@ -1,19 +1,19 @@
-name: NASA_pl_fast_dev
+name: optuna
 dataset:
   root: ../data
   num_sample_geo: 2048
   sigma_geo: 0.05
   num_verts: 2048
   sk_ratio: 0.5
-  train_bsize: 0.0005
+  train_bsize: 0.01
   val_bsize: 0.006
   test_bsize: 0.05
 
 learning_rate: 1e-5
-batch_size: 20
+batch_size: 12
 num_threads: 12
 
-ckpt_path: "../data/checkpoints/NASA_pl/top_k_epoch=5.ckpt"
+ckpt_path: ""
 overfit: 0
 resume: False
 test_mode: False
@@ -22,7 +22,7 @@ fast_dev: False
 momentum: 0.5 
 optim: SGD
 
-num_epoch: 2
+num_epoch: 5
 freq_eval: 2
 freq_plot: 2
 freq_show: 2

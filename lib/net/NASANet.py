@@ -39,7 +39,7 @@ class ResidualBlock(nn.Module):
     
 
 class NASANet(nn.Module):
-    def __init__(self, n_elements, n_layers, width, D_dim):
+    def __init__(self, n_elements, n_layers, width, D_dim, trial=None):
         super(NASANet, self).__init__()
 
         self.n_elements = n_elements
