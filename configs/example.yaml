@@ -10,7 +10,7 @@ learning_rate: 1e-3
 batch_size: 24
 num_threads: 24
 
-ckpt_path: ../data/checkpoints/virgin/ckpt_13.pth
+# ckpt_path: ../data/checkpoints/virgin/ckpt_13.pth
 resume: False
 overfit: False
 

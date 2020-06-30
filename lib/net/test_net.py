@@ -3,19 +3,21 @@ import math
 import argparse
 import cv2
 import os
+import trimesh
 import numpy as np
 
 import torch
 import torchvision
 import torch.nn.functional as F
 
+
+sys.path.insert(0, '../')
+
 from lib.common.trainer import Trainer
 from lib.common.config import get_cfg_defaults
 from lib.dataset.AMASSdataset import AMASSdataset
 from lib.net.DeepSDF import Net
 from lib.net.seg3d_lossless import Seg3dLossless
-
-sys.path.insert(0, '../')
 
 def find_vertices(sdf, direction="front"):
     '''
@@ -94,6 +96,7 @@ class TestEngine():
             b_max=[[ 1.0,  1.0,  1.0]],
             resolutions=self.resolutions,
             balance_value=0.5,
+            export_mesh=True,
             visualize=False,
             faster=True).to(device)
 
@@ -102,7 +105,12 @@ class TestEngine():
         with torch.no_grad():
 
             # forward
-            sdf = self.reconEngine(priors=priors)[0,0]
+            sdf, verts, faces, colrs = self.reconEngine(priors=priors)
+
+            # verts = verts.detach().cpu().numpy()
+            # faces = faces.detach().cpu().numpy()
+            # colrs = colrs.detach().cpu().numpy()
+
             depth, height, width = sdf.size()
             # mask = F.interpolate(mask, size=(height, width))
             # sdf = sdf * (mask[0] > 0.1).float()
@@ -138,7 +146,7 @@ if __name__ == '__main__':
     device = 'cuda:0'
 
     # set dataset
-    test_dataset = AMASSdataset(cfg.dataset, split="test")
+    test_dataset = AMASSdataset(cfg, split="test")
     test_loader = torch.utils.data.DataLoader(
         test_dataset,
         batch_size=1, shuffle=False,
@@ -149,13 +157,13 @@ if __name__ == '__main__':
     # setup net 
     net = Net(21, 4, 40, 4).to(device)
     trainer = Trainer(net, cfg, use_tb=True)
-    trainer.load_ckpt(
-        os.path.join(trainer.checkpoints_path, 'ckpt_3.pth'))
+    # trainer.load_ckpt(
+    #     os.path.join(trainer.checkpoints_path, 'ckpt_3.pth'))
     
     test_engine = TestEngine(trainer.query_func, device)
     render = test_engine(priors=bdata)
 
-    cv2.imwrite(os.path.join(cfg.results_path, "render_result.jpg"), render[:, :, ::-1])
+    # cv2.imwrite(os.path.join(cfg.results_path, "render_result.jpg"), render[:, :, ::-1])
 
 
     

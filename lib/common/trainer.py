@@ -22,7 +22,7 @@ class Trainer():
         
         # set logger
         self.logger = colorlogger(logdir=self.results_path)
-        self.logger.info(self.opt)
+        # self.logger.info(self.opt)
         
         # set tensorboard
         if use_tb:
@@ -120,7 +120,7 @@ class Trainer():
 
         pred = self.net(data_BX, data_BT)
         pred_max = torch.max(pred, dim=2)[0][:,None,:]
-        # pred = self.test_recon(points)
+        # pred_max = self.test_recon(points)
 
         # return [B, 1, N]
         return pred_max
@@ -131,7 +131,7 @@ class Trainer():
         import trimesh
         import numpy as np
 
-        mesh_ori = trimesh.load_mesh("/home/ICT2000/yxiu/Code/trainer.pytorch/mesh.obj")
+        mesh_ori = trimesh.load_mesh("/home/ICT2000/yxiu/Code/NASA.pytorch/data/mesh.obj")
 
         rot_mat = trimesh.transformations.rotation_matrix(np.pi, [0,0,1])
         mesh_ori = mesh_ori.apply_transform(rot_mat)
