@@ -94,6 +94,7 @@ class TestEngine():
             resolutions=self.resolutions,
             balance_value=0.5,
             visualize=False,
+            export_mesh=True,
             faster=True).cuda()
 
     def __call__(self, priors):
@@ -101,7 +102,7 @@ class TestEngine():
         with torch.no_grad():
 
             # forward
-            sdf = self.reconEngine(priors=priors)[0,0]
+            sdf, verts, faces, colrs = self.reconEngine(priors=priors)
             depth, height, width = sdf.size()
             # mask = F.interpolate(mask, size=(height, width))
             # sdf = sdf * (mask[0] > 0.1).float()
@@ -118,7 +119,8 @@ class TestEngine():
 
             image = torch.cat([image1, image2, image3, image4], axis=3)
             image = image.cpu().numpy()[0].transpose(1, 2, 0) * 255.0
-            return np.uint8(image)  # rgb
+            
+            return np.uint8(image), verts, faces, colrs
 
 
 if __name__ == '__main__':

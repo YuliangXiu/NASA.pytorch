@@ -204,14 +204,26 @@ class LightNASA(pl.LightningModule):
 
             if batch_idx % cfg.freq_show == 0:
 
-                render = self.testor(priors=self.static_test_batch)
+                render, verts, faces, colrs = self.testor(priors=self.static_test_batch)
                 self.images.append(np.flip(render[:, :, ::-1],axis=0))
                 imageio.mimsave(os.path.join(cfg.results_path, 
                                             cfg.name, 
                                             "results.gif"), self.images)
-                self.logger.experiment.add_image('Image', 
-                        np.flip(render[:, :, ::-1],axis=0).transpose(2,0,1), 
-                        self.global_step)
+                self.logger.experiment.add_image(
+                        tag=f'Image/{self.global_step}', 
+                        img_tensor=np.flip(render[:, :, ::-1],axis=0).transpose(2,0,1), 
+                        global_step=self.global_step)
+
+                self.tmux_logger.info(f'\nverts: {verts.shape}, {verts.type()}, {verts.max(dim=0)[0]}, {verts.min(dim=0)[0]}\n' \
+                                    +f'\nfaces: {faces.shape}, {faces.type()}, {faces.max(dim=0)[0]}, {faces.min(dim=0)[0]}\n' \
+                                    +f'\ncolrs: {colrs.shape}, {colrs.type()}, {colrs.max(dim=0)[0]}, {colrs.min(dim=0)[0]}\n')
+                
+                self.logger.experiment.add_mesh(
+                        tag=f'mesh/{self.global_step}',
+                        vertices=verts.unsqueeze(0),
+                        faces=faces.unsqueeze(0),
+                        colors=colrs.unsqueeze(0),
+                        global_step=self.global_step)
 
         return {'loss': loss, 'log': logs, 'progress_bar': logs_bar}
 
@@ -345,7 +357,7 @@ if __name__ == '__main__':
         'limit_val_batches':cfg.dataset.val_bsize,
         'limit_test_batches':cfg.dataset.test_bsize,
         'profiler':True,
-        'num_sanity_val_steps':0,
+        'num_sanity_val_steps':1,
         'fast_dev_run':cfg.fast_dev,
         'max_epochs':cfg.num_epoch,
         'val_check_interval':cfg.freq_eval,

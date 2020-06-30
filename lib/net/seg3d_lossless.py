@@ -43,6 +43,7 @@ def plot_mask3D(
         
     vp.show(*vis_list, bg="white", axes=1, interactive=interactive, azimuth=30, elevation=30)
 
+
 def create_grid3D(min, max, steps):
     if type(min) is int:
         min = (min, min, min) # (x, y, z)
@@ -77,7 +78,7 @@ class Seg3dLossless(nn.Module):
     def __init__(self, 
                  query_func, b_min, b_max, resolutions,
                  channels=1, balance_value=0.5, align_corners=False, 
-                 visualize=False, debug=False, use_cuda_impl=False, faster=False, 
+                 visualize=False, export_mesh=False, debug=False, use_cuda_impl=False, faster=False, 
                  use_shadow=False, **kwargs):
         """
         align_corners: same with how you process gt. (grid_sample / interpolate) 
@@ -99,6 +100,7 @@ class Seg3dLossless(nn.Module):
         self.debug = debug
         self.use_cuda_impl = use_cuda_impl
         self.faster = faster
+        self.export_mesh = export_mesh
         self.use_shadow = use_shadow
         self.nsamples_max = 200000
 
@@ -276,8 +278,13 @@ class Seg3dLossless(nn.Module):
                         voxels, 
                         coords_accum
                     ], dim=1).unique(dim=1)
-        
-        return occupancys
+
+        if self.export_mesh:
+            verts, faces, colrs = self.export_mesh_func(occupancys, 
+                                    final_D, final_H, final_W)
+            return occupancys[0,0], verts, faces, colrs
+        else:
+            return occupancys
 
     
     def _forward(self, **kwargs):
@@ -475,7 +482,7 @@ class Seg3dLossless(nn.Module):
                 if self.visualize:
                     this_stage_coords = torch.cat(this_stage_coords, dim=1)
                     self.plot(occupancys, this_stage_coords, final_D, final_H, final_W)
-                    
+                
         return occupancys
 
     def plot(self, occupancys, coords, final_D, final_H, final_W, title='', **kwargs):
@@ -488,3 +495,36 @@ class Seg3dLossless(nn.Module):
         
         plot_mask3D(
             final[0, 0].to("cpu"), title, (x, y, z), **kwargs)
+
+    def export_mesh_func(self, occupancys, final_D, final_H, final_W):
+        from lib.net.mcubes import marching_cubes, grid_interp
+        import numpy as np
+        from skimage import measure
+
+        final = F.interpolate(
+            occupancys.float(), size=(final_D, final_H, final_W), 
+            mode="trilinear", align_corners=True) # here true is correct!
+
+        final = final[0, 0, :final_D-1, :final_H-1, :final_W-1].contiguous()
+
+        N = final_D.to('cpu').item() - 1
+        x, y, z = np.mgrid[:N, :N, :N]
+        x = (x / N).astype('float32')
+        y = (y / N).astype('float32')
+        z = (z / N).astype('float32')
+
+        rgb = np.stack((x, y, z), axis=-1)
+        rgb = np.transpose(rgb, axes=(3, 2, 1, 0)).copy()
+        rgb = torch.from_numpy(rgb).cuda()
+
+        verts, faces = marching_cubes(final, self.balance_value)
+        faces = faces[:,[0,2,1]]
+
+        ## marching cube (CPU version)
+        # from skimage import measure
+        # verts, faces, normals, values = measure.marching_cubes_lewiner(
+        #     final[0,0].detach().cpu().numpy(), 0.5, gradient_direction='ascent')
+
+        colrs = grid_interp(rgb, verts)
+
+        return verts, faces, colrs

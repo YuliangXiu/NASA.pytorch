@@ -7,6 +7,8 @@ This is a PyTorch implementation of [NASA: Neural Articulated Shape Approximatio
 ## Requirements
 - [Human Pose Prior[modified version]](https://github.com/YuliangXiu/human_body_prior)
 - [AMASS](https://github.com/nghorbani/amass)
+- [PyTorch-Lightning](https://pytorch-lightning.readthedocs.io/)
+- [mcubes_pytorch](https://github.com/tatsy/mcubes_pytorch)
 
 ## Related works
 - [AMASS: Archive of Motion Capture as Surface Shapes](https://amass.is.tue.mpg.de/)

@@ -13,9 +13,9 @@ learning_rate: 1e-5
 batch_size: 24
 num_threads: 24
 
-ckpt_path: ""
+ckpt_path: "../data/checkpoints/NASA_pl/top_k_epoch=5.ckpt"
 overfit: 0
-resume: True
+resume: False
 test_mode: False
 fast_dev: False
 
