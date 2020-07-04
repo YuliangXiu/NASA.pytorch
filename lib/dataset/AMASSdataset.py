@@ -1,6 +1,8 @@
 import os, sys
 
 sys.path.insert(0, '../../')
+sys.path.insert(0, '../')
+sys.path.insert(0, '.')
 
 import numpy as np
 from PIL import Image
@@ -43,6 +45,7 @@ class AMASSdataset(Dataset):
         self.overfit = opt.overfit
         self.num_betas = num_betas
         self.num_poses = 21
+        self.neighbors = 3
         self.bm_path = os.path.dirname(os.path.abspath(__file__)) + \
                                 '/amass/body_models/smplh/%s/model.npz'
         self.ds = {}
@@ -92,20 +95,24 @@ class AMASSdataset(Dataset):
 
         # [num_verts, 21]
         weights = data_dict['samples_verts_weights']
-        weights_label = weights.max(dim=1)[1]
 
-        # label all keypoints of hands as same
-        weights_label[(weights_label>=21) & (weights_label<36)] = 19
-        weights_label[(weights_label>=36) & (weights_label<51)] = 20
+        # merge skinning weights of hands
+        weights[:,19] = weights[:, 21:36].max(dim=1)[0]
+        weights[:,20] = weights[:, 36:51].max(dim=1)[0]
 
-        weights_one_hot = torch.nn.functional.one_hot(weights_label) * 0.5
+        values, indices = weights[:,:21].topk(self.neighbors, 
+                                            dim=1, largest=True, sorted=True)
+        weights_fill = torch.zeros_like(weights[:,:21]).scatter_(1, indices, values)
+        weights_min = weights_fill.min(dim=1, keepdim=True)[0]
+        weights_max = weights_fill.max(dim=1, keepdim=True)[0]
+        weights_norm = (weights_fill - weights_min) / weights_max * 0.5
 
         return {'B_inv': B_inv,
                 'T_0': T_0,
                 # 'weights_label': weights_label,
                 # 'samples_verts': data_dict['samples_verts'],
                 # 'joints': data_dict['joints'],
-                'weights': weights_one_hot,
+                'weights': weights_norm,
                 'data_BX':data_BX, 
                 'data_BT':data_BT, 
                 'targets':targets}
@@ -113,7 +120,8 @@ class AMASSdataset(Dataset):
     
     def load_mesh(self, data_dict):
 
-        gender_type = "male" if data_dict["gender"] == -1 else "female"
+        # gender_type = "male" if data_dict["gender"] == -1 else "female"
+        gender_type = 'male'
 
         with torch.no_grad():
             bm = BodyModel(bm_path=self.bm_path%(gender_type), num_betas=self.num_betas, batch_size=1)
@@ -272,20 +280,22 @@ if __name__ == '__main__':
     # with tinyobj loader 5.27 iter/s
     import tqdm
     for data_dict in tqdm.tqdm(dataset):
-        print(data_dict['weights_label'].shape, type(data_dict['weights_label']))
-        # print(data_dict['joints'].shape, type(data_dict['joints']))
-        print(data_dict['samples_verts'].shape, type(data_dict['samples_verts']))
+        # print(data_dict['weights_label'].shape, type(data_dict['weights_label']))
+        # # print(data_dict['joints'].shape, type(data_dict['joints']))
+        # print(data_dict['samples_verts'].shape, type(data_dict['samples_verts']))
 
         
-        new_data_dict = {}
-        new_data_dict['samples_geo'] = data_dict['samples_verts'].detach().cpu().numpy()
-        new_data_dict['labels_geo']= data_dict['weights_label'].detach().cpu().numpy()
-        dataset.visualize_sampling3D(new_data_dict, only_pc=True)
+        # new_data_dict = {}
+        # new_data_dict['samples_geo'] = data_dict['samples_verts'].detach().cpu().numpy()
+        # new_data_dict['labels_geo']= data_dict['weights_label'].detach().cpu().numpy()
+        # dataset.visualize_sampling3D(new_data_dict, only_pc=True)
 
-        joints  = data_dict['joints']
-        new_data_dict['samples_geo'] = joints
-        new_data_dict['labels_geo']= np.arange(joints.shape[0])
-        dataset.visualize_sampling3D(new_data_dict, only_pc=True)
+        # joints  = data_dict['joints']
+        # new_data_dict['samples_geo'] = joints
+        # new_data_dict['labels_geo']= np.arange(joints.shape[0])
+        # dataset.visualize_sampling3D(new_data_dict, only_pc=True)
+
+        print(data_dict['weights'][3958,-2:])
 
 
         break

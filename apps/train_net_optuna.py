@@ -296,7 +296,6 @@ def objective(trial):
     checkpoint = ModelCheckpoint(
         filepath=osp.join(cfg.checkpoints_path, cfg.name, 
                             "trial_{}".format(trial.number)),
-        verbose=True,
         monitor='val/acc'
     )
 
@@ -306,7 +305,7 @@ def objective(trial):
     metrics_callback = MetricsCallback()
 
     trainer_kwargs = {
-        'gpus':1,
+        'gpus':[1],
         'logger':False,
         'distributed_backend':'dp',
         'checkpoint_callback':checkpoint,
@@ -350,9 +349,9 @@ if __name__ == '__main__':
     pruner = optuna.pruners.MedianPruner()
     study = optuna.create_study(direction="maximize", pruner=pruner)
     study.optimize(objective, 
-                    n_trials=20, 
+                    n_trials=2, 
                     timeout=600, 
-                    n_jobs=1,
+                    n_jobs=2,
                     gc_after_trial=True, 
                     show_progress_bar=True)
     

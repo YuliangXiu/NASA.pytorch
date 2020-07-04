@@ -371,7 +371,7 @@ if __name__ == '__main__':
             print("Training is done.\n")
 
     trainer_kwargs = {
-        'gpus':[1],
+        'gpus':cfg.gpus,
         'logger':tb_logger,
         'callbacks':[LogCallback()],
         'checkpoint_callback':checkpoint,
