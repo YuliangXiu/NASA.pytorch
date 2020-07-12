@@ -109,6 +109,8 @@ class AMASSdataset(Dataset):
 
         return {'B_inv': B_inv,
                 'T_0': T_0,
+                'verts': np.array(data_dict['mesh'].verts),
+                'faces': np.array(data_dict['mesh'].faces),
                 # 'weights_label': weights_label,
                 # 'samples_verts': data_dict['samples_verts'],
                 # 'joints': data_dict['joints'],

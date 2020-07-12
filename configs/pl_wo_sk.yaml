@@ -1,17 +1,17 @@
-name: NASA_wo_sk
+name: NASA_w_sk_3
 dataset:
   root: ../data
   num_sample_geo: 2048
   sigma_geo: 0.05
   num_verts: 2048
-  sk_ratio: 0.0
+  sk_ratio: 3.0
   train_bsize: 1.0
   val_bsize: 0.2
   test_bsize: 1.0
 
 learning_rate: 1e-4
-batch_size: 12
-num_threads: 12
+batch_size: 6
+num_threads: 6
 gpus: [0]
 
 ckpt_path: ""
@@ -24,8 +24,8 @@ momentum: 0.5
 optim: Adam
 
 num_epoch: 10
-freq_eval: 2000
-freq_plot: 200
-freq_show: 400
-freq_save: 1000
+freq_eval: 4000
+freq_plot: 400
+freq_show: 800
+freq_save: 2000
 schedule: [4, 7]

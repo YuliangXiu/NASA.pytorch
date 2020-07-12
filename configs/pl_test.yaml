@@ -1,30 +1,31 @@
-name: NASA_pl_fast_dev
+name: NASA_testor
 dataset:
   root: ../data
   num_sample_geo: 2048
   sigma_geo: 0.05
   num_verts: 2048
   sk_ratio: 0.5
-  train_bsize: 0.0005
-  val_bsize: 0.006
+  train_bsize: 1.0
+  val_bsize: 0.2
   test_bsize: 0.01
 
-learning_rate: 1e-5
-batch_size: 20
+learning_rate: 1e-4
+batch_size: 12
 num_threads: 12
+gpus: [1]
 
 ckpt_path: "../data/checkpoints/NASA_w_sk/top_k_epoch=9.ckpt"
 overfit: 0
 resume: False
-test_mode: False
+test_mode: True
 fast_dev: False
 
 momentum: 0.5 
-optim: SGD
+optim: Adam
 
-num_epoch: 2
-freq_eval: 2
-freq_plot: 2
-freq_show: 2
-freq_save: 2
-schedule: [1]
+num_epoch: 10
+freq_eval: 2000
+freq_plot: 200
+freq_show: 400
+freq_save: 1000
+schedule: [4, 7]

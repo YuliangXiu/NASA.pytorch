@@ -17,6 +17,7 @@ from lib.common.config import get_cfg_defaults
 from lib.common.logger import colorlogger
 from lib.dataset.AMASSdataset import AMASSdataset
 from lib.dataset.hoppeMesh import HoppeMesh
+from lib.dataset.mesh_util import calculate_fscore, calculate_mIoU, calculate_chamfer
 from lib.net.NASANet import NASANet
 from lib.net.test_net import TestEngine
 
@@ -36,7 +37,8 @@ class LightNASA(pl.LightningModule):
         self.batch_size = cfg.batch_size
         self.static_test_batch = None
         self.images = []
-        self.testor = None
+        self.testor_train = None
+        self.testor_test = None
         self.tmux_logger = colorlogger(logdir=osp.join(cfg.results_path, cfg.name)) 
 
         self.hparams = {'lr': cfg.learning_rate,
@@ -142,7 +144,7 @@ class LightNASA(pl.LightningModule):
 
         test_data_loader = DataLoader(
             self.test_dataset,
-            batch_size=self.batch_size, shuffle=False,
+            batch_size=1, shuffle=False,
             num_workers=cfg.num_threads, pin_memory=True)
         
         self.tmux_logger.info(
@@ -186,7 +188,7 @@ class LightNASA(pl.LightningModule):
     def training_step(self, batch, batch_idx):
 
         if self.static_test_batch is None:
-            self.testor = TestEngine(self.query_func, self.device)
+            self.testor_train = TestEngine(self.query_func, self.device, False)
             self.static_test_batch = batch
             self.logger.experiment.add_graph(self.model, 
                                     (batch['data_BX'], batch['data_BT']))
@@ -203,6 +205,10 @@ class LightNASA(pl.LightningModule):
 
         loss_sample = F.mse_loss(output_max, target)        
         loss_skw = F.mse_loss(output_verts, weights)
+
+        # for better acc
+        output_max = output_max[:, :-(cfg.dataset.num_verts)]
+        target = target[:, :-(cfg.dataset.num_verts)]
 
         loss = loss_sample + cfg.dataset.sk_ratio * loss_skw
 
@@ -232,7 +238,8 @@ class LightNASA(pl.LightningModule):
 
             if batch_idx % cfg.freq_show == 0:
 
-                render, verts, faces, colrs = self.testor(priors=self.static_test_batch)
+                # render, verts, faces, colrs = self.testor_test(priors=self.static_test_batch)
+                render = self.testor_train(priors=self.static_test_batch)[0,0]
                 self.images.append(np.flip(render[:, :, ::-1],axis=0))
                 imageio.mimsave(os.path.join(cfg.results_path, 
                                             cfg.name, 
@@ -242,12 +249,12 @@ class LightNASA(pl.LightningModule):
                         img_tensor=np.flip(render[:, :, ::-1],axis=0).transpose(2,0,1), 
                         global_step=self.global_step)
 
-                self.logger.experiment.add_mesh(
-                        tag=f'mesh/{self.global_step}',
-                        vertices=verts.unsqueeze(0),
-                        faces=faces.unsqueeze(0),
-                        colors=(colrs.unsqueeze(0)*255).int(),
-                        global_step=self.global_step)
+                # self.logger.experiment.add_mesh(
+                #         tag=f'mesh/{self.global_step}',
+                #         vertices=verts.unsqueeze(0),
+                #         faces=faces.unsqueeze(0),
+                #         colors=(colrs.unsqueeze(0)*255).int(),
+                #         global_step=self.global_step)
 
         return {'loss': loss, 'log': logs, 'progress_bar': logs_bar}
 
@@ -267,6 +274,10 @@ class LightNASA(pl.LightningModule):
         loss_skw = F.mse_loss(output_verts, weights)
 
         loss = loss_sample + cfg.dataset.sk_ratio * loss_skw
+
+        # for better acc
+        output_max = output_max[:, :-(cfg.dataset.num_verts)]
+        target = target[:, :-(cfg.dataset.num_verts)]
 
         output_max = output_max.masked_fill(output_max<0.5, 0.)
         output_max = output_max.masked_fill(output_max>0.5, 1.)
@@ -288,20 +299,22 @@ class LightNASA(pl.LightningModule):
         logs_bar = {'l_val': avg_loss, 
                 'p1': avg_acc*100.0}
         
-        self.logger.log_hyperparams(params=self.hparams, metrics=logs)
+        # self.logger.log_hyperparams(params=self.hparams, metrics=logs)
 
         return {'avg_val_loss': avg_loss, 
                 'log': logs, 
                 'progress_bar': logs_bar}
 
     def test_step(self, batch, batch_idx):
+
+        self.testor_test = TestEngine(self.query_func, self.device, True)
         
         data_BX, data_BT, target, weights = \
                 batch['data_BX'], \
                 batch['data_BT'], \
                 batch['targets'], \
                 batch['weights']
-            
+        
         output = self.forward(data_BX, data_BT)
         output_max = torch.max(output, dim=2)[0]
         output_verts = output[:, -(cfg.dataset.num_verts):, :]
@@ -311,21 +324,60 @@ class LightNASA(pl.LightningModule):
 
         loss = loss_sample + cfg.dataset.sk_ratio * loss_skw
 
+        # for better acc
+        output_max = output_max[:, :-(cfg.dataset.num_verts)]
+        target = target[:, :-(cfg.dataset.num_verts)]
+
         output_max = output_max.masked_fill(output_max<0.5, 0.)
         output_max = output_max.masked_fill(output_max>0.5, 1.)
 
         acc = output_max.eq(target).float().mean()
 
-        return {'test_loss': loss, 'test_acc': acc}
+        verts_gt = batch['verts'][0] # [B, 6890, 3]
+        faces_gt = batch['faces'][0] # [B, 13776, 3]
+
+        _, verts_pr, faces_pr, colrs_pr = self.testor_test(priors=batch)
+        
+        verts_pr -= 128.0
+        verts_pr /= 128.0
+        
+        fscore, precision, recall = calculate_fscore(verts_gt, verts_pr)
+        mIoU = calculate_mIoU(output_max, target)
+        chamfer, p2s = calculate_chamfer(verts_gt, faces_gt, verts_pr, faces_pr)
+
+        if batch_idx % 2 == 0:
+            self.logger.experiment.add_mesh(
+                            tag=f'mesh_pred/{batch_idx}',
+                            vertices=verts_pr.unsqueeze(0),
+                            faces=faces_pr.unsqueeze(0),
+                            colors=(colrs_pr.unsqueeze(0)*255).int())
+
+            self.logger.experiment.add_mesh(
+                            tag=f'mesh_gt/{batch_idx}',
+                            vertices=verts_gt.unsqueeze(0),
+                            faces=faces_gt.unsqueeze(0))
+        
+        return {'test_loss': loss, 
+                'test_acc': acc,
+                'test_fscore': fscore,
+                'test_mIoU': mIoU,
+                'test_chamfer': chamfer}
 
 
     def test_epoch_end(self, outputs):
         avg_loss = torch.stack([x['test_loss'] for x in outputs]).mean()
         avg_acc = torch.stack([x['test_acc'] for x in outputs]).mean()
+        avg_fscore= np.array([x['test_fscore'] for x in outputs]).mean()
+        avg_mIoU= np.array([x['test_mIoU'] for x in outputs]).mean()
+        avg_chamfer= np.array([x['test_chamfer'] for x in outputs]).mean()
         
         metrics = {'test/loss': avg_loss.item(), 
-                'test/acc': avg_acc.item()}
-        
+                'test/acc': avg_acc.item(),
+                'test/fscore': avg_fscore,
+                'test/mIoU': avg_mIoU,
+                'test/chamfer': avg_chamfer}
+
+        self.logger.log_hyperparams(params=self.hparams, metrics=metrics)
         self.logger.save()
 
         return {'log': metrics} 
@@ -415,4 +467,5 @@ if __name__ == '__main__':
     if not cfg.test_mode:
         trainer.fit(model)
     
+    np.random.seed(1993)
     trainer.test(model)

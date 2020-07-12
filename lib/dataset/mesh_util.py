@@ -1,5 +1,10 @@
 import numpy as np
 import tinyobjloader
+import torch
+from tqdm import tqdm
+import trimesh
+import kaolin as kal
+import open3d as o3d
 
 def obj_loader(path):
    # Create reader.
@@ -277,3 +282,86 @@ def save_obj_mesh_with_color(mesh_path, verts, faces, colors):
         f_plus = f + 1
         file.write('f %d %d %d\n' % (f_plus[0], f_plus[1], f_plus[2]))
     file.close()
+
+
+
+def calculate_fscore(verts_gt, verts_pr, th=0.01):
+
+    gt = o3d.geometry.PointCloud()
+    gt.points = o3d.utility.Vector3dVector(verts_gt.detach().cpu().numpy())
+
+    pr = o3d.geometry.PointCloud()
+    pr.points = o3d.utility.Vector3dVector(verts_pr.detach().cpu().numpy())
+
+    d1 = gt.compute_point_cloud_distance(pr)
+    d2 = pr.compute_point_cloud_distance(gt)
+    
+    if len(d1) and len(d2):
+        recall = float(sum(d < th for d in d2)) / float(len(d2))
+        precision = float(sum(d < th for d in d1)) / float(len(d1))
+
+        if recall+precision > 0:
+            fscore = 2 * recall * precision / (recall + precision)
+        else:
+            fscore = 0
+    else:
+        fscore = 0
+        precision = 0
+        recall = 0
+
+    return fscore, precision, recall
+
+
+def calculate_mIoU(outputs, labels):
+   
+    SMOOTH = 1e-6
+
+    outputs = outputs.int()
+    labels = labels.int()
+
+    intersection = (outputs & labels).float().sum()  # Will be zero if Truth=0 or Prediction=0
+    union = (outputs | labels).float().sum()         # Will be zzero if both are 0
+    
+    iou = (intersection + SMOOTH) / (union + SMOOTH)  # We smooth our devision to avoid 0/0
+    
+    thresholded = torch.clamp(20 * (iou - 0.5), 0, 10).ceil() / 10  # This is equal to comparing with thresolds
+    
+    return thresholded.mean().detach().cpu().numpy()  # Or thresholded.mean() if you are interested in average across the batch
+
+
+def calculate_chamfer(verts_gt, faces_gt, verts_pr, faces_pr, sampled_points=1000):
+
+    chamfer_arr, p2s_arr = [], []
+
+    mesh_gt = trimesh.Trimesh(vertices=verts_gt.detach().cpu().numpy(),
+                                faces=faces_gt.detach().cpu().numpy())
+    mesh_pred = trimesh.Trimesh(vertices=verts_pr.detach().cpu().numpy(),
+                                faces=faces_pr.detach().cpu().numpy())
+                                
+    gt_surface_pts, _ = trimesh.sample.sample_surface_even(
+            mesh_gt, sampled_points)
+    pred_surface_pts, _ = trimesh.sample.sample_surface_even(
+            mesh_pred, sampled_points)
+    
+    kal_mesh_gt = kal.rep.TriangleMesh.from_tensors(
+            verts_gt.float(),
+            faces_gt.long())
+    kal_mesh_pred = kal.rep.TriangleMesh.from_tensors(
+        verts_pr.float(),
+        faces_pr.long())
+
+    kal_distance_0 = kal.metrics.mesh.point_to_surface(
+        torch.tensor(pred_surface_pts).float().to(verts_gt.device), kal_mesh_gt)
+    kal_distance_1 = kal.metrics.mesh.point_to_surface(
+        torch.tensor(gt_surface_pts).float().to(verts_gt.device), kal_mesh_pred)
+
+    dist_gt_pred = torch.sqrt(kal_distance_0).cpu().numpy()
+    dist_pred_gt = torch.sqrt(kal_distance_1).cpu().numpy()
+
+    chamfer_dist = 0.5 * (dist_pred_gt.mean() + dist_gt_pred.mean())
+    p2s_dist = dist_pred_gt.mean()
+    
+    chamfer_arr.append(chamfer_dist)
+    p2s_arr.append(p2s_dist)
+
+    return np.average(chamfer_arr), np.average(p2s_arr)
