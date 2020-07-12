@@ -288,7 +288,7 @@ class Seg3dLossless(nn.Module):
                                     final_D, final_H, final_W)
             return occupancys[0,0], verts, faces, colrs
         else:
-            return occupancys
+            return occupancys[0,0]
 
     
     def _forward(self, **kwargs):

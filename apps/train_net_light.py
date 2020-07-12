@@ -239,7 +239,7 @@ class LightNASA(pl.LightningModule):
             if batch_idx % cfg.freq_show == 0:
 
                 # render, verts, faces, colrs = self.testor_test(priors=self.static_test_batch)
-                render = self.testor_train(priors=self.static_test_batch)[0,0]
+                render, _, _, _ = self.testor_train(priors=self.static_test_batch)
                 self.images.append(np.flip(render[:, :, ::-1],axis=0))
                 imageio.mimsave(os.path.join(cfg.results_path, 
                                             cfg.name, 
@@ -345,7 +345,7 @@ class LightNASA(pl.LightningModule):
         mIoU = calculate_mIoU(output_max, target)
         chamfer, p2s = calculate_chamfer(verts_gt, faces_gt, verts_pr, faces_pr)
 
-        if batch_idx % 2 == 0:
+        if batch_idx % 100 == 0:
             self.logger.experiment.add_mesh(
                             tag=f'mesh_pred/{batch_idx}',
                             vertices=verts_pr.unsqueeze(0),

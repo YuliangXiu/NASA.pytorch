@@ -88,6 +88,7 @@ class TestEngine():
     def __init__(self, query_func, device, export=False):
         self.resolutions = [16+1, 32+1, 64+1, 128+1, 256+1]
         self.device = device
+        self.export = export
         self.reconEngine = Seg3dLossless(
             query_func=query_func, 
             b_min=[[-1.0, -1.0, -1.0]],
@@ -95,7 +96,7 @@ class TestEngine():
             resolutions=self.resolutions,
             balance_value=0.5,
             visualize=False,
-            export_mesh=export,
+            export_mesh=self.export,
             faster=True).to(self.device)
 
     def __call__(self, priors):
@@ -103,7 +104,15 @@ class TestEngine():
         with torch.no_grad():
 
             # forward
-            sdf, verts, faces, colrs = self.reconEngine(priors=priors)
+            verts = None
+            faces = None
+            colrs = None
+
+            if self.export:
+                sdf, verts, faces, colrs = self.reconEngine(priors=priors)
+            else:
+                sdf = self.reconEngine(priors=priors)
+
             depth, height, width = sdf.size()
             # mask = F.interpolate(mask, size=(height, width))
             # sdf = sdf * (mask[0] > 0.1).float()
@@ -122,7 +131,6 @@ class TestEngine():
             image = image.cpu().numpy()[0].transpose(1, 2, 0) * 255.0
             
             return np.uint8(image), verts, faces, colrs
-
 
 if __name__ == '__main__':
 
