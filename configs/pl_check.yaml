@@ -1,6 +1,6 @@
 name: NASA_pl_fast_dev
 dataset:
-  root: ../data
+  root: "data_cloth3d"
   num_sample_geo: 2048
   sigma_geo: 0.05
   num_verts: 2048

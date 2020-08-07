@@ -21,6 +21,10 @@ from human_body_prior.tools.omni_tools import apply_mesh_tranfsormations_
 from human_body_prior.tools.visualization_tools import imagearray2file
 from human_body_prior.body_model.body_model import BodyModel
 
+from lib.dataset.cloth3d.prepare_data import outfit_types, fabric_types
+from lib.dataset.cloth3d.read import DataReader
+from lib.dataset.cloth3d.IO import quads2tris
+
 import torch
 import torchvision.transforms as transforms
 from torch.utils.data import Dataset
@@ -36,23 +40,25 @@ import matplotlib.pyplot as plt
 def projection(points, calib):
     return np.matmul(calib[:3, :3], points.T).T + calib[:3, 3]
 
-class AMASSdataset(Dataset):
-    """AMASS: a pytorch loader for unified human motion capture dataset. http://amass.is.tue.mpg.de/"""
+class CLOTH3Ddataset(Dataset):
 
-    def __init__(self, opt, split, num_betas=16):
+    def __init__(self, opt, split, num_betas=10):
 
         self.opt = opt.dataset
         self.overfit = opt.overfit
         self.num_betas = num_betas
-        self.num_poses = 21
+        self.num_poses = 24
         self.neighbors = 3
         self.bm_path = os.path.dirname(os.path.abspath(__file__)) + \
-                                '/amass/body_models/smplh/%s/model.npz'
+                                '/amass/body_models/smpl/model_%s.pkl'
         self.ds = {}
         for data_fname in glob.glob(os.path.join(
                         self.opt.root, split, '*.pt')):
             k = os.path.basename(data_fname).replace('.pt','')
             self.ds[k] = torch.load(data_fname)
+
+        self.reader = DataReader()
+        self.reader.SRC = os.path.join(self.opt.root, "raw")
 
     def __len__(self):
 
@@ -63,21 +69,24 @@ class AMASSdataset(Dataset):
             idx = 0 # for overfitting
         data_dict =  {k: self.ds[k][idx] for k in self.ds.keys()}
         data_dict['root_orient'] = data_dict['pose'][:3]
-        data_dict['pose_body'] = data_dict['pose'][3:66]
-        data_dict['pose_hand'] = data_dict['pose'][66:]
+        data_dict['pose_body'] = data_dict['pose'][3:-6]
+        data_dict['pose_hand'] = data_dict['pose'][-6:]
         data_dict['betas'] = data_dict['betas'][:self.num_betas]
 
         self.num_poses = data_dict['pose_body'].shape[0] // 3
 
         data_dict.update(self.load_mesh(data_dict))
         data_dict.update(self.get_sampling_geo(data_dict))
+        data_dict.update(self.load_cloth(data_dict))
+        # data_dict.update(self.get_sampling_cloth(data_dict))
 
         # data_dict['A'] [22, 4, 4] bone transform matrix wrt root
-
         # [21, 4, 4] bone(w/o root) transform matrix
         B_inv = data_dict['A'][1:].inverse()
+
         # root location [4,]
         T_0 = data_dict['A'][0,:,-1]
+
         # sample points [N, 1, 4, 1]
         X = torch.cat((data_dict['samples_geo'], 
             torch.ones(self.opt.num_sample_geo+self.opt.num_verts, 1)),dim=1)[:, None, :, None] 
@@ -90,48 +99,78 @@ class AMASSdataset(Dataset):
         data_BT = torch.matmul(B_inv, T_0[None, None,:,None].repeat(
             self.opt.num_sample_geo+self.opt.num_verts, 1, 1, 1))[:, :, :3, 0] 
 
-        # [N, ]
-        targets = data_dict['labels_geo']
-
         # [num_verts, 21]
         weights = data_dict['samples_verts_weights']
 
-        # merge skinning weights of hands
-        weights[:,19] = weights[:, 21:36].max(dim=1)[0]
-        weights[:,20] = weights[:, 36:51].max(dim=1)[0]
-
-        values, indices = weights[:,:21].topk(self.neighbors, 
+        values, indices = weights.topk(self.neighbors, 
                                             dim=1, largest=True, sorted=True)
-        weights_fill = torch.zeros_like(weights[:,:21]).scatter_(1, indices, values)
+        weights_fill = torch.zeros_like(weights).scatter_(1, indices, values)
         weights_min = weights_fill.min(dim=1, keepdim=True)[0]
         weights_max = weights_fill.max(dim=1, keepdim=True)[0]
         weights_norm = (weights_fill - weights_min) / weights_max * 0.5
 
         return {'B_inv': B_inv,
                 'T_0': T_0,
-                'verts': np.array(data_dict['mesh'].verts),
-                'faces': np.array(data_dict['mesh'].faces),
-                # 'weights_label': weights_label,
-                # 'samples_verts': data_dict['samples_verts'],
-                # 'joints': data_dict['joints'],
-                # 'pose_mat': data_dict['pose_matrot'],
-                # 'A': data_dict['A'],
+
+                'verts_body': data_dict['verts_body'],
+                'faces_body': data_dict['faces_body'],
+
+                'verts_cloth': data_dict['verts_cloth'], # cloth
+                'faces_cloth': data_dict['faces_cloth'], # cloth
+
+                'samples_verts': data_dict['samples_verts'],
                 'weights': weights_norm,
+
+                'samples_geo': data_dict['samples_geo'],
+                'targets': data_dict['labels_geo'],
+
+                'joints': data_dict['joints'],
+                'pose_mat': data_dict['pose_matrot'],
+                'A': data_dict['A'],
+
                 'data_BX':data_BX, 
-                'data_BT':data_BT, 
-                'targets':targets}
+                'data_BT':data_BT}
+
+    def load_cloth(self, data_dict):
+
+        # clothes
+        garments_lst = list(np.nonzero(c2c(data_dict['outfit']))[0])
+        garments = [outfit_types[idx] for idx in garments_lst]
+
+        frame_id = c2c(data_dict['frame']).item()
+        sample_id = "%05d"%(c2c(data_dict['idx']).item())
+
+        V = None
+        F = None
+
+        for garment in garments:
+            V_ = self.reader.read_garment_vertices(sample_id, garment, frame_id)
+            F_ = quads2tris(self.reader.read_garment_topology(sample_id, garment))
+
+            if (V is None) and (F is None):
+                V = V_
+                F = F_
+            else:
+                V = np.concatenate((V, V_),0)
+                F = np.concatenate((F,F_),0)
+
+
+        return {'verts_cloth': V,
+                'faces_cloth': F}
+
 
     
     def load_mesh(self, data_dict):
 
-        # gender_type = "male" if data_dict["gender"] == -1 else "female"
-        gender_type = 'male'
+        gender_type = "m" if data_dict["gender"] == 1 else "f"
 
         with torch.no_grad():
             bm = BodyModel(bm_path=self.bm_path%(gender_type), num_betas=self.num_betas, batch_size=1)
-            # body = bm.forward(pose_body=data_dict['pose_body'].unsqueeze(0), 
-            #                 betas=data_dict['betas'].unsqueeze(0))
-            body = bm.forward(pose_body=data_dict['pose_body'].unsqueeze(0))
+            body = bm.forward(root_orient=data_dict['root_orient'].unsqueeze(0), 
+                                pose_body=data_dict['pose_body'].unsqueeze(0), 
+                                pose_hand=data_dict['pose_hand'].unsqueeze(0), 
+                                betas=data_dict['betas'].unsqueeze(0), 
+                                trans=data_dict['trans'].unsqueeze(0))
 
         # move the mesh to the original
         joints = c2c(body.Jtr)[0]
@@ -153,13 +192,15 @@ class AMASSdataset(Dataset):
             vert_normals=vert_normals, 
             face_normals=face_normals)
 
-        return {'mesh': mesh, 
-                # 'joints': joints[1:self.num_poses+1],
+        return {'verts_body': verts,
+                'faces_body': faces, 
+                'mesh_body': mesh,
+                'joints': joints[1:self.num_poses+1],
                 'A': body.A[0,:self.num_poses+1],
                 'weights': body.weights[:,1:]}
 
     def get_sampling_geo(self, data_dict):
-        mesh = data_dict['mesh']
+        mesh = data_dict['mesh_body']
         weights = data_dict['weights'] #[6890, 52]
 
         # Samples are around the true surface with an offset
@@ -209,7 +250,7 @@ class AMASSdataset(Dataset):
 
         return {
             'samples_geo': torch.Tensor(samples), 
-            # 'samples_verts': torch.Tensor(samples_verts),
+            'samples_verts': torch.Tensor(samples_verts),
             'samples_verts_weights': torch.Tensor(samples_verts_weights),
             'labels_geo': torch.Tensor(labels),
         }
@@ -220,29 +261,34 @@ class AMASSdataset(Dataset):
         from matplotlib import cm
 
         cmap = cm.get_cmap('jet')
-        samples = data_dict[f'samples_geo']
-        labels = data_dict[f'labels_geo']
+        samples = c2c(data_dict['samples_geo'])
+        labels = c2c(data_dict['targets'])
         colors = cmap(labels/labels.max())[:,:3]
-
-        # [-1, 1]
-        points = samples
         
         # create plot
         vp = vtkplotter.Plotter(title="", size=(1500, 1500))
         vis_list = []
 
         if not only_pc:
+
             # create a mesh
-            mesh = data_dict['mesh']
-            faces = mesh.faces
-            verts = mesh.verts
+            body = trimesh.Trimesh(
+                    data_dict['verts_body'], 
+                    data_dict['faces_body'])
+            body.visual.face_colors = [200, 200, 250, 255]
+            vis_list.append(body)
 
-            mesh = trimesh.Trimesh(verts, faces)
-            mesh.visual.face_colors = [200, 200, 250, 255]
-            vis_list.append(mesh)
+            if 'verts_cloth' in data_dict.keys() and \
+                'faces_cloth' in data_dict.keys():
+                cloth = trimesh.Trimesh(
+                    data_dict['verts_cloth'],
+                    data_dict['faces_cloth'])
 
+                cloth.visual.face_colors = [200, 200, 0, 255]
+                vis_list.append(cloth)
+            
         # create a pointcloud
-        pc = vtkplotter.Points(points, r=12, c=np.float32(colors))
+        pc = vtkplotter.Points(samples, r=12, c=np.float32(colors))
         vis_list.append(pc)
         
         vp.show(*vis_list, bg="white", axes=1, interactive=True)
@@ -266,42 +312,14 @@ if __name__ == '__main__':
     # cfg.merge_from_list(opts)
     cfg.freeze()
 
-    dataset = AMASSdataset(cfg, split='vald')
-    # dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.workers)
-    # bdata = next(iter(dataloader))
-
-    # print(bdata['B_inv'].shape)
-
-    # if args.num_sample_geo:
-    #     dataset.visualize_sampling(data_dict, '../test_data/proj_geo.jpg', mode='geo')
-    # if args.num_sample_color:
-    #     dataset.visualize_sampling(data_dict, '../test_data/proj_color.jpg', mode='color')
-
-    # dataset.visualize_sampling3D(data_dict, mode='color')
-    # dataset.visualize_sampling3D(data_dict, mode='geo')
+    dataset = CLOTH3Ddataset(cfg, split='vald')
 
     # speed 3.30 iter/s
     # with tinyobj loader 5.27 iter/s
     import tqdm
+
     for data_dict in tqdm.tqdm(dataset):
-        # print(data_dict['weights_label'].shape, type(data_dict['weights_label']))
-        # # print(data_dict['joints'].shape, type(data_dict['joints']))
-        # print(data_dict['samples_verts'].shape, type(data_dict['samples_verts']))
 
-        
-        # new_data_dict = {}
-        # new_data_dict['samples_geo'] = data_dict['samples_verts'].detach().cpu().numpy()
-        # new_data_dict['labels_geo']= data_dict['weights_label'].detach().cpu().numpy()
-        # dataset.visualize_sampling3D(new_data_dict, only_pc=True)
-
-        # joints  = data_dict['joints']
-        # new_data_dict['samples_geo'] = joints
-        # new_data_dict['labels_geo']= np.arange(joints.shape[0])
-        # dataset.visualize_sampling3D(new_data_dict, only_pc=True)
-
-        # print(data_dict['weights'][3958,-2:])
-        print(data_dict['A'])
-        print(data_dict['pose_mat'])
-
+        dataset.visualize_sampling3D(data_dict, only_pc=False)
 
         break
