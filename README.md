@@ -10,6 +10,16 @@ This is a PyTorch implementation of [NASA: Neural Articulated Shape Approximatio
 - [PyTorch-Lightning](https://pytorch-lightning.readthedocs.io/)
 - [mcubes_pytorch](https://github.com/tatsy/mcubes_pytorch)
 
+## Dataset Processing
+- [AMASS](https://github.com/nghorbani/amass)
+- [CLOTH3D](https://github.com/YuliangXiu/CLOTH3D/Demo/dataset.ipynb)
+
+## Training
+
+```
+CUDA_VISIBLE_DEVICES=1 python train_net_light.py  -cfg ../configs/pl_w_sk.yaml   -- \ 
+```
+
 ## Related works
 - [AMASS: Archive of Motion Capture as Surface Shapes](https://amass.is.tue.mpg.de/)
 - [Expressive Body Capture: 3D Hands, Face, and Body from a Single Image](https://smpl-x.is.tue.mpg.de/)
