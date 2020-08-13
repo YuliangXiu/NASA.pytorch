@@ -60,6 +60,9 @@ class CLOTH3Ddataset(Dataset):
         self.reader = DataReader()
         self.reader.SRC = os.path.join(self.opt.root, "raw")
 
+        self.samples_body = None
+        self.samples_cloth = None
+
     def __len__(self):
 
        return len(self.ds['trans'])
@@ -76,9 +79,9 @@ class CLOTH3Ddataset(Dataset):
         self.num_poses = data_dict['pose_body'].shape[0] // 3
 
         data_dict.update(self.load_mesh(data_dict))
-        data_dict.update(self.get_sampling_geo(data_dict))
         data_dict.update(self.load_cloth(data_dict))
-        # data_dict.update(self.get_sampling_cloth(data_dict))
+        data_dict.update(self.get_sampling_geo(data_dict))
+        data_dict.update(self.get_sampling_cloth(data_dict))
 
         # data_dict['A'] [22, 4, 4] bone transform matrix wrt root
         # [21, 4, 4] bone(w/o root) transform matrix
@@ -88,7 +91,7 @@ class CLOTH3Ddataset(Dataset):
         T_0 = data_dict['A'][0,:,-1]
 
         # sample points [N, 1, 4, 1]
-        X = torch.cat((data_dict['samples_geo'], 
+        X = torch.cat((data_dict['samples_body'], 
             torch.ones(self.opt.num_sample_geo+self.opt.num_verts, 1)),dim=1)[:, None, :, None] 
 
         # [21, 4, 4] x [N, 1, 4, 1] - > [N, 21, 4, 1] -- > [N, 21, 3]
@@ -115,14 +118,18 @@ class CLOTH3Ddataset(Dataset):
                 'verts_body': data_dict['verts_body'],
                 'faces_body': data_dict['faces_body'],
 
-                'verts_cloth': data_dict['verts_cloth'], # cloth
-                'faces_cloth': data_dict['faces_cloth'], # cloth
+                'verts_cloth': data_dict['verts_cloth'], 
+                'faces_cloth': data_dict['faces_cloth'],
 
-                'samples_verts': data_dict['samples_verts'],
+                'samples_verts_body': data_dict['samples_verts_body'],
+                'samples_verts_cloth': data_dict['samples_verts_cloth'],
                 'weights': weights_norm,
 
-                'samples_geo': data_dict['samples_geo'],
-                'targets': data_dict['labels_geo'],
+                'samples_body': data_dict['samples_body'],
+                'targets_body': data_dict['labels_body'],
+
+                'samples_cloth': data_dict['samples_cloth'],
+                'targets_cloth': data_dict['labels_cloth'],
 
                 'joints': data_dict['joints'],
                 'pose_mat': data_dict['pose_matrot'],
@@ -154,9 +161,25 @@ class CLOTH3Ddataset(Dataset):
                 V = np.concatenate((V, V_),0)
                 F = np.concatenate((F,F_),0)
 
+        mesh_ori = trimesh.Trimesh(vertices=V, 
+                                    faces=F, 
+                                    process=False)
+
+        verts = mesh_ori.vertices
+        vert_normals = mesh_ori.vertex_normals
+        face_normals = mesh_ori.face_normals
+        faces = mesh_ori.faces
+
+        mesh = HoppeMesh(
+            verts=verts, 
+            faces=faces, 
+            vert_normals=vert_normals, 
+            face_normals=face_normals)
+
 
         return {'verts_cloth': V,
-                'faces_cloth': F}
+                'faces_cloth': F,
+                'mesh_cloth': mesh}
 
 
     
@@ -249,10 +272,64 @@ class CLOTH3Ddataset(Dataset):
         labels = np.concatenate([labels, 0.5 * np.ones(self.opt.num_verts)])
 
         return {
-            'samples_geo': torch.Tensor(samples), 
-            'samples_verts': torch.Tensor(samples_verts),
+            'samples_body': torch.Tensor(samples), 
+            'samples_verts_body': torch.Tensor(samples_verts),
             'samples_verts_weights': torch.Tensor(samples_verts_weights),
-            'labels_geo': torch.Tensor(labels),
+            'labels_body': torch.Tensor(labels),
+        }
+
+    def get_sampling_cloth(self, data_dict):
+
+        mesh = data_dict['mesh_cloth']
+
+        # Samples are around the true surface with an offset
+        n_samples_surface = 4 * self.opt.num_sample_geo
+        samples_surface, face_index = sample_surface(
+            mesh.triangles(), n_samples_surface)
+        offset = np.random.normal(
+            scale=self.opt.sigma_geo, size=(n_samples_surface, 1))
+        samples_surface += mesh.face_normals[face_index] * offset
+
+        samples_verts_idx = np.random.choice(np.arange(mesh.verts.shape[0]),
+                            self.opt.num_verts, replace=False)
+        samples_verts = mesh.verts[samples_verts_idx, :]
+                
+        # Uniform samples in [-1, 1]
+        b_min = np.array([-1.0, -1.0, -1.0])
+        b_max = np.array([ 1.0,  1.0,  1.0])
+        n_samples_space = self.opt.num_sample_geo // 4
+        samples_space = np.random.rand(n_samples_space, 3) * (b_max - b_min) + b_min
+        
+        # total sampled points
+        samples = np.concatenate([samples_surface, samples_space], 0)
+        np.random.shuffle(samples)
+
+        # labels: in->1.0; out->0.0.
+        inside = mesh.contains(samples)
+
+        # balance in and out
+        inside_samples = samples[inside > 0.5]
+        outside_samples = samples[inside <= 0.5]
+
+        nin = inside_samples.shape[0]
+        if nin > self.opt.num_sample_geo // 2:
+            inside_samples = inside_samples[:self.opt.num_sample_geo // 2]
+            outside_samples = outside_samples[:self.opt.num_sample_geo // 2]
+        else:
+            outside_samples = outside_samples[:(self.opt.num_sample_geo - nin)]
+            
+        samples = np.concatenate([inside_samples, outside_samples], 0)
+        labels = np.concatenate([
+            np.ones(inside_samples.shape[0]), np.zeros(outside_samples.shape[0])])
+
+        # add original verts
+        samples = np.concatenate([samples, samples_verts], 0)
+        labels = np.concatenate([labels, 0.5 * np.ones(self.opt.num_verts)])
+
+        return {
+            'samples_cloth': torch.Tensor(samples), 
+            'samples_verts_cloth': torch.Tensor(samples_verts),
+            'labels_cloth': torch.Tensor(labels),
         }
 
 
@@ -260,10 +337,16 @@ class CLOTH3Ddataset(Dataset):
         import vtkplotter
         from matplotlib import cm
 
-        cmap = cm.get_cmap('jet')
-        samples = c2c(data_dict['samples_geo'])
-        labels = c2c(data_dict['targets'])
-        colors = cmap(labels/labels.max())[:,:3]
+        cmap_body = cm.get_cmap('jet')
+        cmap_cloth = cm.get_cmap('Paired')
+
+        samples_body = c2c(data_dict['samples_body'])
+        labels_body = c2c(data_dict['targets_body'])
+        colors_body = cmap_body(labels_body/labels_body.max())[:,:3]
+
+        samples_cloth = c2c(data_dict['samples_cloth'])
+        labels_cloth = c2c(data_dict['targets_cloth'])
+        colors_cloth = cmap_cloth(labels_cloth/labels_cloth.max())[:,:3]
         
         # create plot
         vp = vtkplotter.Plotter(title="", size=(1500, 1500))
@@ -275,7 +358,7 @@ class CLOTH3Ddataset(Dataset):
             body = trimesh.Trimesh(
                     data_dict['verts_body'], 
                     data_dict['faces_body'])
-            body.visual.face_colors = [200, 200, 250, 255]
+            body.visual.face_colors = [200, 200, 0, 255]
             vis_list.append(body)
 
             if 'verts_cloth' in data_dict.keys() and \
@@ -284,12 +367,17 @@ class CLOTH3Ddataset(Dataset):
                     data_dict['verts_cloth'],
                     data_dict['faces_cloth'])
 
-                cloth.visual.face_colors = [200, 200, 0, 255]
+                cloth.visual.face_colors = [0, 200, 0, 255]
                 vis_list.append(cloth)
             
-        # create a pointcloud
-        pc = vtkplotter.Points(samples, r=12, c=np.float32(colors))
-        vis_list.append(pc)
+        # # create a pointcloud
+        # pc = vtkplotter.Points(np.concatenate((samples_body, samples_cloth),0), 
+        #                         r=12, 
+        #                         c=np.float32(np.concatenate((colors_body, colors_cloth),0)))
+        # # pc = vtkplotter.Points(samples_body, 
+        # #                         r=12, 
+        # #                         c=np.float32(colors_body))
+        # vis_list.append(pc)
         
         vp.show(*vis_list, bg="white", axes=1, interactive=True)
         

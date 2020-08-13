@@ -289,10 +289,10 @@ if __name__ == '__main__':
         # print(data_dict['samples_verts'].shape, type(data_dict['samples_verts']))
 
         
-        # new_data_dict = {}
-        # new_data_dict['samples_geo'] = data_dict['samples_verts'].detach().cpu().numpy()
-        # new_data_dict['labels_geo']= data_dict['weights_label'].detach().cpu().numpy()
-        # dataset.visualize_sampling3D(new_data_dict, only_pc=True)
+        new_data_dict = {}
+        new_data_dict['samples_geo'] = data_dict['samples_verts'].detach().cpu().numpy()
+        new_data_dict['labels_geo']= data_dict['weights_label'].detach().cpu().numpy()
+        dataset.visualize_sampling3D(new_data_dict, only_pc=True)
 
         # joints  = data_dict['joints']
         # new_data_dict['samples_geo'] = joints
@@ -300,8 +300,8 @@ if __name__ == '__main__':
         # dataset.visualize_sampling3D(new_data_dict, only_pc=True)
 
         # print(data_dict['weights'][3958,-2:])
-        print(data_dict['A'])
-        print(data_dict['pose_mat'])
+        # print(data_dict['A'])
+        # print(data_dict['pose_mat'])
 
 
         break
